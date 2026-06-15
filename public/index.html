@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Romaji Line Translator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">文</div>
+          <div>
+            <div class="eyebrow">Romaji Line Translator</div>
+            <h1>Romaji Line Translator</h1>
+            <p class="description">改行で確定した行だけを、自然な日本語へ静かに変換します。</p>
+          </div>
+        </div>
+        <div class="status-pill" id="globalStatus">待機中</div>
+      </header>
+
+      <section class="workspace" aria-label="翻訳ワークスペース">
+        <div class="panel input-panel">
+          <div class="panel-header">
+            <label for="sourceText">入力</label>
+            <div class="meta-row">
+              <span id="lineCount">0 行</span>
+              <span class="divider">•</span>
+              <span>改行で確定</span>
+            </div>
+          </div>
+          <textarea
+            id="sourceText"
+            placeholder="konnichiwa&#10;ashita no yotei wo kakunin shitai"
+            spellcheck="false"
+          ></textarea>
+        </div>
+
+        <div class="panel output-panel">
+          <div class="panel-header">
+            <span>変換結果</span>
+            <div class="meta-row">
+              <span id="convertedCount">0 / 0</span>
+              <span class="divider">•</span>
+              <span id="totalChars">0 文字</span>
+              <button id="copyResult" class="icon-button" type="button">コピー</button>
+            </div>
+          </div>
+          <div id="results" class="results empty">改行で確定した行から変換結果が表示されます。</div>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="操作">
+        <button id="convertAll" class="primary-button" type="button">全体を変換</button>
+        <button id="clearAll" type="button">クリア</button>
+      </section>
+
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
