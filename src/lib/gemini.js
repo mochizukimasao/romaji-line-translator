@@ -7,7 +7,7 @@ export function buildTranslatePrompt(lines) {
     'The input is mostly romaji. Some Japanese may already be mixed in; preserve its meaning and polish it naturally.',
     'Prefer the most natural conversational meaning when there are multiple interpretations.',
     'Preserve punctuation intent and line intent as much as possible.',
-    'Return only JSON that matches the schema. Do not add explanations.',
+    'Return only a JSON array of translated strings in the same order. Do not add explanations.',
     '',
     'Input lines:',
     JSON.stringify(lines)
@@ -43,7 +43,13 @@ export async function translateRomajiLines(lines, { apiKey, model = 'gemini-2.5-
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
   const parsed = JSON.parse(text);
-  const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
+  const translations = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed.translations)
+      ? parsed.translations
+      : Array.isArray(parsed.items)
+        ? parsed.items
+        : [];
 
   if (translations.length !== lines.length) {
     throw new Error('変換結果の行数が一致しませんでした。');
