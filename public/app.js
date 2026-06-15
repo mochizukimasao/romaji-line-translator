@@ -30,6 +30,11 @@ function getConfirmedLineCount() {
   return Math.max(lines.length - 1, 0);
 }
 
+function resizeSourceText() {
+  sourceText.style.height = 'auto';
+  sourceText.style.height = `${Math.max(sourceText.scrollHeight, 540)}px`;
+}
+
 function setMessage(text = '', isError = false) {
   message.textContent = text;
   message.classList.toggle('error', isError);
@@ -207,6 +212,10 @@ sourceText.addEventListener('input', () => {
   render();
 });
 
+window.addEventListener('resize', () => {
+  resizeSourceText();
+});
+
 convertAllButton.addEventListener('click', translateAllLines);
 copyButton.addEventListener('click', copyResult);
 clearButton.addEventListener('click', () => {
@@ -219,4 +228,5 @@ clearButton.addEventListener('click', () => {
   sourceText.focus();
 });
 
+resizeSourceText();
 render();

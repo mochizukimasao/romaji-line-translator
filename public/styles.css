@@ -171,7 +171,8 @@ textarea {
   display: block;
   width: 100%;
   min-height: 540px;
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
   border: 0;
   outline: 0;
   padding: 22px 20px 18px;
