@@ -102,6 +102,8 @@ function render() {
       return row;
     })
   );
+
+  resizeSourceText();
 }
 
 async function requestTranslation(lines) {
@@ -209,6 +211,7 @@ async function copyResult() {
 sourceText.addEventListener('input', () => {
   setMessage('');
   translateConfirmedLines();
+  resizeSourceText();
   render();
 });
 
@@ -224,6 +227,7 @@ clearButton.addEventListener('click', () => {
   inFlight.clear();
   failed.clear();
   setMessage('');
+  resizeSourceText();
   render();
   sourceText.focus();
 });
