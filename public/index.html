@@ -17,7 +17,13 @@
             <p class="description">改行で確定した行だけを、自然な日本語へ静かに変換します。</p>
           </div>
         </div>
-        <div class="status-pill" id="globalStatus">待機中</div>
+        <div class="topbar-tools">
+          <div class="status-pill" id="globalStatus">待機中</div>
+          <div class="topbar-actions" aria-label="補助操作">
+            <button id="copyResult" class="icon-button" type="button">コピー</button>
+            <button id="clearAll" class="icon-button" type="button">クリア</button>
+          </div>
+        </div>
       </header>
 
       <section class="workspace" aria-label="翻訳ワークスペース">
@@ -44,7 +50,6 @@
               <span id="convertedCount">0 / 0</span>
               <span class="divider">•</span>
               <span id="totalChars">0 文字</span>
-              <button id="copyResult" class="icon-button" type="button">コピー</button>
             </div>
           </div>
           <div id="results" class="results empty">改行で確定した行から変換結果が表示されます。</div>
@@ -53,7 +58,6 @@
 
       <section class="controls" aria-label="操作">
         <button id="convertAll" class="primary-button" type="button">全体を変換</button>
-        <button id="clearAll" type="button">クリア</button>
       </section>
 
       <p id="message" class="message" role="status" aria-live="polite"></p>
