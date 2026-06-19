@@ -71,7 +71,13 @@ body::before {
   flex: 0 0 auto;
 }
 
-.topbar-actions {
+.page-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 16px;
+}
+
+.page-actions-group {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -360,7 +366,13 @@ button:disabled {
     align-items: flex-start;
   }
 
-  .topbar-actions {
+  .page-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .page-actions-group {
     width: 100%;
     justify-content: flex-start;
   }
@@ -399,7 +411,7 @@ button:disabled {
   }
 
   .controls button,
-  .topbar-actions button {
+  .page-actions-group button {
     flex: 1 1 100%;
   }
 }
