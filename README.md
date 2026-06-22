@@ -1,6 +1,6 @@
 # Romaji Line Translator
 
-ローマ字だけのメモを、改行ごとに Gemini API で自然な日本語へ変換する小さな Web アプリです。出力は原則として平叙体で、です・ます調に寄せません。
+ローマ字をかなにだけ変換する小さな Web アプリです。意味の言い換え、口調の変更、意訳はしません。既存の漢字やかな、記号は保持します。
 
 ## 構成
 
@@ -32,7 +32,7 @@ cp .env.example .env
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 PORT=3000
 ```
 

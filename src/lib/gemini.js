@@ -1,33 +1,14 @@
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-function createStyleGuardHint(attempt) {
-  if (attempt === 0) {
-    return '';
-  }
-
+function buildTranslatePrompt(lines) {
   return [
-    'Previous output contained polite Japanese.',
-    'Rewrite every line in plain form only.',
-    'Do not use です, ます, でした, ました, ません, でしょう, or polite request forms.',
-    'Keep the meaning, but keep the wording as close and literal as possible.'
-  ].join(' ');
-}
-
-function hasPoliteJapanese(text) {
-  return /(?:です|ます|でした|ました|ません|でしょう|ください|ございます|いたします|なさいます)(?:[。！？!?…]|$)/.test(
-    String(text ?? '').trim()
-  );
-}
-
-export function buildTranslatePrompt(lines) {
-  return [
-    'You are a careful Japanese text converter.',
-    'Convert each input line into concise, natural Japanese in plain form only.',
-    'Never rewrite the result into です/ます style.',
-    'The input is mostly romaji. Some Japanese may already be mixed in; preserve its meaning and keep the original tone.',
-    'Prefer the most literal meaning that is still natural in Japanese.',
-    'Preserve punctuation intent and line intent as much as possible.',
-    'Do not add honorifics, explanatory phrasing, or extra softness.',
+    'You convert Japanese text strictly by orthography rules.',
+    'Hard requirement: convert romaji to kana only.',
+    'Do not translate, paraphrase, summarize, or change tone.',
+    'Do not change existing kanji, hiragana, katakana, punctuation, spaces, or line breaks.',
+    'Only convert Latin-script romaji sequences into natural Japanese kana.',
+    'Apply standard Japanese spelling conventions.',
+    'For example, sentence-final wa used as the particle should become は.',
     'Return only a JSON array of translated strings in the same order. Do not add explanations.',
     '',
     'Input lines:',
@@ -35,10 +16,52 @@ export function buildTranslatePrompt(lines) {
   ].join('\n');
 }
 
+function parseResponse(text) {
+  const parsed = JSON.parse(text);
+  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(parsed.translations)) return parsed.translations;
+  if (Array.isArray(parsed.items)) return parsed.items;
+  return [];
+}
+
+function safeString(value) {
+  return String(value ?? '');
+}
+
+function isSubsequence(needle, haystack) {
+  let cursor = 0;
+  for (const char of haystack) {
+    if (char === needle[cursor]) {
+      cursor += 1;
+      if (cursor === needle.length) return true;
+    }
+  }
+  return needle.length === 0;
+}
+
+function validateConversion(input, output) {
+  const inputText = safeString(input);
+  const outputText = safeString(output);
+  if (!outputText) return false;
+
+  const inputNonRomaji = inputText.replace(/[A-Za-z]+(?:'[A-Za-z]+)*/g, '');
+  const outputNonRomaji = outputText.replace(/[A-Za-z]+(?:'[A-Za-z]+)*/g, '');
+
+  return isSubsequence(inputNonRomaji, outputNonRomaji);
+}
+
 async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY が設定されていません。');
   }
+
+  const guard = attempt
+    ? [
+        'Previous output violated the hard requirement.',
+        'Do not rewrite Japanese that is already present.',
+        'Only convert romaji to kana, nothing else.'
+      ].join(' ')
+    : '';
 
   const response = await fetch(
     `${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -46,7 +69,12 @@ async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: `${createStyleGuardHint(attempt)}\n${buildTranslatePrompt(lines)}`.trim() }] }],
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${guard}\n${buildTranslatePrompt(lines)}`.trim() }]
+          }
+        ],
         generationConfig: {
           temperature: 0,
           responseMimeType: 'application/json'
@@ -62,35 +90,22 @@ async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
     throw new Error(message);
   }
 
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-  const parsed = JSON.parse(text);
-  const translations = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(parsed.translations)
-      ? parsed.translations
-      : Array.isArray(parsed.items)
-        ? parsed.items
-        : [];
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+  const translations = parseResponse(text);
 
   if (translations.length !== lines.length) {
     throw new Error('変換結果の行数が一致しませんでした。');
   }
 
-  return translations.map((line) => String(line ?? '').trim());
+  const normalized = translations.map((line) => safeString(line).trimEnd());
+  if (!normalized.every((line, index) => validateConversion(lines[index], line))) {
+    throw new Error('ローマ字以外の文字が書き換えられました。');
+  }
+
+  return normalized;
 }
 
 export async function translateRomajiLines(lines, { apiKey, model = 'gemini-2.5-flash' } = {}) {
   const firstPass = await requestTranslation(lines, { apiKey, model, attempt: 0 });
-
-  if (!firstPass.some(hasPoliteJapanese)) {
-    return firstPass;
-  }
-
-  const secondPass = await requestTranslation(lines, { apiKey, model, attempt: 1 });
-
-  if (secondPass.some(hasPoliteJapanese)) {
-    throw new Error('丁寧語が混ざったため、平叙体への変換に失敗しました。');
-  }
-
-  return secondPass;
+  return firstPass;
 }

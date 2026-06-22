@@ -4,7 +4,6 @@ import { translateRomajiLines } from './src/lib/gemini.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
@@ -25,14 +24,14 @@ app.post('/api/translate', async (req, res) => {
 
     const translations = await translateRomajiLines(normalizedLines, {
       apiKey: process.env.GEMINI_API_KEY,
-      model
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
     });
 
     res.json({ translations });
   } catch (error) {
     console.error(error);
     const detail = error?.message ? ` (${error.message})` : '';
-    res.status(500).json({ error: `Gemini での変換に失敗しました${detail}` });
+    res.status(500).json({ error: `変換に失敗しました${detail}` });
   }
 });
 

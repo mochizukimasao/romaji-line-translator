@@ -25,9 +25,6 @@ export async function onRequestPost(context) {
   } catch (error) {
     console.error(error);
     const detail = error?.message ? ` (${error.message})` : '';
-    return Response.json(
-      { error: `Gemini での変換に失敗しました${detail}` },
-      { status: 500 }
-    );
+    return Response.json({ error: `Gemini での変換に失敗しました${detail}` }, { status: 500 });
   }
 }
