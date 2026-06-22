@@ -3,10 +3,10 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 function buildTranslatePrompt(lines) {
   return [
     'You convert Japanese text strictly by orthography rules.',
-    'Hard requirement: convert romaji to kana only.',
+    'Hard requirement: convert romaji to natural Japanese.',
     'Do not translate, paraphrase, summarize, or change tone.',
     'Do not change existing kanji, hiragana, katakana, punctuation, spaces, or line breaks.',
-    'Only convert Latin-script romaji sequences into natural Japanese kana.',
+    'Convert Latin-script romaji sequences into natural Japanese, using kanji, hiragana, and katakana as appropriate.',
     'Return only a JSON array of translated strings in the same order. Do not add explanations.',
     '',
     'Input lines:',
