@@ -44,6 +44,30 @@ function lineKey(index, text) {
   return `${index}:${text}`;
 }
 
+function splitTargets(targets, maxLines = 12, maxChars = 2800) {
+  const chunks = [];
+  let chunk = [];
+  let charCount = 0;
+
+  for (const item of targets) {
+    const itemChars = item.text.length;
+    if (chunk.length && (chunk.length >= maxLines || charCount + itemChars > maxChars)) {
+      chunks.push(chunk);
+      chunk = [];
+      charCount = 0;
+    }
+
+    chunk.push(item);
+    charCount += itemChars;
+  }
+
+  if (chunk.length) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
+
 function getTotalChars(displayLines) {
   return displayLines.reduce((sum, line, index) => {
     const key = lineKey(index, line);
@@ -120,29 +144,33 @@ async function requestTranslation(lines) {
   return data.translations;
 }
 
-async function translateLine(index, text) {
-  if (!text.trim()) return;
-
-  const key = lineKey(index, text);
-  if (translations.has(key) || inFlight.has(key)) return;
+async function translateTargets(targets, successMessage = '') {
+  if (!targets.length) return;
 
   const serial = ++requestSerial;
-  inFlight.set(key, serial);
-  failed.delete(key);
+  targets.forEach((item) => {
+    inFlight.set(item.key, serial);
+  });
   setMessage('');
   render();
 
   try {
-    const [translated] = await requestTranslation([text]);
-    if (inFlight.get(key) === serial) {
-      translations.set(key, translated || '');
+    for (const chunk of splitTargets(targets)) {
+      const translatedLines = await requestTranslation(chunk.map((item) => item.text));
+      translatedLines.forEach((translated, index) => {
+        const item = chunk[index];
+        if (inFlight.get(item.key) === serial) {
+          translations.set(item.key, translated || '');
+        }
+      });
     }
+    if (successMessage) setMessage(successMessage);
   } catch (error) {
     setMessage('');
   } finally {
-    if (inFlight.get(key) === serial) {
-      inFlight.delete(key);
-    }
+    targets.forEach((item) => {
+      if (inFlight.get(item.key) === serial) inFlight.delete(item.key);
+    });
     render();
   }
 }
@@ -150,9 +178,19 @@ async function translateLine(index, text) {
 function translateConfirmedLines() {
   const lines = getAllLines();
   const confirmedCount = getConfirmedLineCount();
+  const targets = [];
+
   for (let index = 0; index < confirmedCount; index += 1) {
-    translateLine(index, lines[index]);
+    const text = lines[index];
+    if (!text.trim()) continue;
+
+    const key = lineKey(index, text);
+    if (translations.has(key) || inFlight.has(key)) continue;
+
+    targets.push({ text, index, key });
   }
+
+  void translateTargets(targets);
 }
 
 async function translateAllLines() {
@@ -169,16 +207,20 @@ async function translateAllLines() {
   const serial = ++requestSerial;
   targets.forEach((item) => {
     inFlight.set(item.key, serial);
-    failed.delete(item.key);
   });
   setMessage('');
   render();
 
   try {
-    const translatedLines = await requestTranslation(targets.map((item) => item.text));
-    translatedLines.forEach((translated, index) => {
-      translations.set(targets[index].key, translated || '');
-    });
+    for (const chunk of splitTargets(targets)) {
+      const translatedLines = await requestTranslation(chunk.map((item) => item.text));
+      translatedLines.forEach((translated, index) => {
+        const item = chunk[index];
+        if (inFlight.get(item.key) === serial) {
+          translations.set(item.key, translated || '');
+        }
+      });
+    }
     setMessage('全体を変換しました。');
   } catch (error) {
     setMessage('');

@@ -12,13 +12,13 @@ app.use(express.static('public'));
 app.post('/api/translate', async (req, res) => {
   try {
     const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
-    if (!lines.length || lines.length > 80) {
-      return res.status(400).json({ error: '1〜80行の入力を送ってください。' });
+    if (!lines.length || lines.length > 200) {
+      return res.status(400).json({ error: '1〜200行の入力を送ってください。' });
     }
 
-    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 500));
+    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 1000));
     const totalLength = normalizedLines.join('\n').length;
-    if (totalLength > 12000) {
+    if (totalLength > 30000) {
       return res.status(400).json({ error: '入力が長すぎます。少し分けて変換してください。' });
     }
 

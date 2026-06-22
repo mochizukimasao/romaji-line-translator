@@ -48,6 +48,31 @@ function validateConversion(input, output) {
   return isSubsequence(inputNonRomaji, outputNonRomaji);
 }
 
+function splitLines(lines, maxLines = 12, maxChars = 2800) {
+  const chunks = [];
+  let chunk = [];
+  let charCount = 0;
+
+  for (const line of lines) {
+    const text = safeString(line);
+    const lineChars = text.length;
+    if (chunk.length && (chunk.length >= maxLines || charCount + lineChars > maxChars)) {
+      chunks.push(chunk);
+      chunk = [];
+      charCount = 0;
+    }
+
+    chunk.push(text);
+    charCount += lineChars;
+  }
+
+  if (chunk.length) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
+
 async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY が設定されていません。');
@@ -104,11 +129,20 @@ async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
 }
 
 export async function translateRomajiLines(lines, { apiKey, model = 'gemini-2.5-flash' } = {}) {
-  try {
-    return await requestTranslation(lines, { apiKey, model, attempt: 0 });
-  } catch (error) {
-    const message = error?.message || 'unknown error';
-    console.warn('[romaji-line-translator] first translation attempt failed, retrying once:', message);
-    return requestTranslation(lines, { apiKey, model, attempt: 1 });
+  const normalizedLines = lines.map((line) => safeString(line));
+  const translated = [];
+
+  for (const chunk of splitLines(normalizedLines)) {
+    try {
+      const result = await requestTranslation(chunk, { apiKey, model, attempt: 0 });
+      translated.push(...result);
+    } catch (error) {
+      const message = error?.message || 'unknown error';
+      console.warn('[romaji-line-translator] first translation attempt failed, retrying once:', message);
+      const retry = await requestTranslation(chunk, { apiKey, model, attempt: 1 });
+      translated.push(...retry);
+    }
   }
+
+  return translated;
 }
