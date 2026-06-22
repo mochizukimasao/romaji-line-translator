@@ -55,6 +55,24 @@ Cloudflare Pages では次の形で載せられます。
 
 `functions/api/translate.js` が Pages Functions として動き、`/api/translate` を処理します。
 
+## デプロイ設定
+
+デプロイは GitHub Actions から Cloudflare Pages に送ります。
+
+固定するものは次の 2 つだけです。
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+運用ルール:
+
+1. Cloudflare の token はこのリポジトリ用に 1 つだけ使う
+2. token を作り直したら GitHub Secrets も必ず同時に更新する
+3. 端末ごとに別の Cloudflare ログイン状態を使わない
+4. GitHub Secrets の値をローカルの `.env` で代用しない
+
+`CLOUDFLARE_API_TOKEN` には Cloudflare Pages への書き込み権限が必要です。
+
 ## ローカル
 
 ```bash
