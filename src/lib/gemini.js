@@ -104,6 +104,11 @@ async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
 }
 
 export async function translateRomajiLines(lines, { apiKey, model = 'gemini-2.5-flash' } = {}) {
-  const firstPass = await requestTranslation(lines, { apiKey, model, attempt: 0 });
-  return firstPass;
+  try {
+    return await requestTranslation(lines, { apiKey, model, attempt: 0 });
+  } catch (error) {
+    const message = error?.message || 'unknown error';
+    console.warn('[romaji-line-translator] first translation attempt failed, retrying once:', message);
+    return requestTranslation(lines, { apiKey, model, attempt: 1 });
+  }
 }
