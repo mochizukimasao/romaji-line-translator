@@ -7,8 +7,6 @@ function buildTranslatePrompt(lines) {
     'Do not translate, paraphrase, summarize, or change tone.',
     'Do not change existing kanji, hiragana, katakana, punctuation, spaces, or line breaks.',
     'Only convert Latin-script romaji sequences into natural Japanese kana.',
-    'Apply standard Japanese spelling conventions.',
-    'For example, sentence-final wa used as the particle should become は.',
     'Return only a JSON array of translated strings in the same order. Do not add explanations.',
     '',
     'Input lines:',
