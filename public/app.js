@@ -138,8 +138,7 @@ async function translateLine(index, text) {
       translations.set(key, translated || '');
     }
   } catch (error) {
-    failed.set(key, true);
-    setMessage(error.message, true);
+    setMessage('');
   } finally {
     if (inFlight.get(key) === serial) {
       inFlight.delete(key);
@@ -182,8 +181,7 @@ async function translateAllLines() {
     });
     setMessage('全体を変換しました。');
   } catch (error) {
-    targets.forEach((item) => failed.set(item.key, true));
-    setMessage(error.message, true);
+    setMessage('');
   } finally {
     targets.forEach((item) => {
       if (inFlight.get(item.key) === serial) inFlight.delete(item.key);
