@@ -6,19 +6,19 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public'));
 
 app.post('/api/translate', async (req, res) => {
   try {
     const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
-    if (!lines.length || lines.length > 200) {
-      return res.status(400).json({ error: '1〜200行の入力を送ってください。' });
+    if (!lines.length || lines.length > 1000) {
+      return res.status(400).json({ error: '1〜1000行の入力を送ってください。' });
     }
 
-    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 1000));
+    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 4000));
     const totalLength = normalizedLines.join('\n').length;
-    if (totalLength > 30000) {
+    if (totalLength > 120000) {
       return res.status(400).json({ error: '入力が長すぎます。少し分けて変換してください。' });
     }
 

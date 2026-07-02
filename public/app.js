@@ -44,6 +44,19 @@ function lineKey(index, text) {
   return `${index}:${text}`;
 }
 
+function getDisplayEntries() {
+  const lines = getAllLines();
+  const confirmedCount = getConfirmedLineCount();
+
+  return lines
+    .map((text, index) => ({
+      index,
+      text,
+      isConfirmed: index < confirmedCount
+    }))
+    .filter((entry) => entry.isConfirmed || entry.text.trim());
+}
+
 function splitTargets(targets, maxLines = 12, maxChars = 2800) {
   const chunks = [];
   let chunk = [];
@@ -70,7 +83,7 @@ function splitTargets(targets, maxLines = 12, maxChars = 2800) {
 
 function getTotalChars(displayLines) {
   return displayLines.reduce((sum, line, index) => {
-    const key = lineKey(index, line);
+    const key = lineKey(line.index, line.text);
     return sum + (translations.get(key)?.length || 0);
   }, 0);
 }
@@ -86,17 +99,17 @@ function getEntry(index, text, isConfirmed) {
 function render() {
   const lines = getAllLines();
   const confirmedCount = getConfirmedLineCount();
-  const displayLines = lines.filter((line, index) => index < confirmedCount || line.trim());
-  const doneCount = displayLines.filter((line, index) => translations.has(lineKey(index, line))).length;
-  const totalCharCount = getTotalChars(displayLines);
+  const displayEntries = getDisplayEntries();
+  const doneCount = displayEntries.filter((entry) => translations.has(lineKey(entry.index, entry.text))).length;
+  const totalCharCount = getTotalChars(displayEntries);
 
-  lineCount.textContent = `${lines.filter((line) => line.trim()).length} 行`;
-  convertedCount.textContent = `${doneCount} / ${displayLines.length}`;
+  lineCount.textContent = `${lines.length} 行`;
+  convertedCount.textContent = `${doneCount} / ${displayEntries.length}`;
   totalChars.textContent = `${totalCharCount} 文字`;
   globalStatus.textContent = inFlight.size ? '変換中' : '待機中';
   convertAllButton.disabled = inFlight.size > 0;
 
-  if (!displayLines.length) {
+  if (!displayEntries.length) {
     results.className = 'results empty';
     results.textContent = '改行で確定した行から変換結果が表示されます。';
     return;
@@ -104,23 +117,22 @@ function render() {
 
   results.className = 'results';
   results.replaceChildren(
-    ...displayLines.map((line, index) => {
-      const isConfirmed = index < confirmedCount;
-      const entry = getEntry(index, line, isConfirmed);
+    ...displayEntries.map((entry) => {
+      const translatedEntry = getEntry(entry.index, entry.text, entry.isConfirmed);
       const row = document.createElement('div');
       row.className = 'result-row';
 
       const number = document.createElement('div');
       number.className = 'line-number';
-      number.textContent = String(index + 1).padStart(2, '0');
+      number.textContent = String(entry.index + 1).padStart(2, '0');
 
       const text = document.createElement('div');
       text.className = 'translated-text';
-      text.textContent = entry.text || (isConfirmed ? '...' : '改行で確定');
+      text.textContent = translatedEntry.text || (entry.isConfirmed ? '...' : '改行で確定');
 
       const status = document.createElement('div');
-      status.className = `row-status ${entry.status}`;
-      status.textContent = isConfirmed ? statusLabels[entry.status] : '未確定';
+      status.className = `row-status ${translatedEntry.status}`;
+      status.textContent = entry.isConfirmed ? statusLabels[translatedEntry.status] : '未確定';
 
       row.append(number, text, status);
       return row;
@@ -149,6 +161,7 @@ async function translateTargets(targets, successMessage = '') {
 
   const serial = ++requestSerial;
   targets.forEach((item) => {
+    failed.delete(item.key);
     inFlight.set(item.key, serial);
   });
   setMessage('');
@@ -161,12 +174,18 @@ async function translateTargets(targets, successMessage = '') {
         const item = chunk[index];
         if (inFlight.get(item.key) === serial) {
           translations.set(item.key, translated || '');
+          failed.delete(item.key);
         }
       });
     }
     if (successMessage) setMessage(successMessage);
   } catch (error) {
-    setMessage('');
+    targets.forEach((item) => {
+      if (inFlight.get(item.key) === serial && !translations.has(item.key)) {
+        failed.set(item.key, true);
+      }
+    });
+    setMessage(error?.message || '変換に失敗しました。', true);
   } finally {
     targets.forEach((item) => {
       if (inFlight.get(item.key) === serial) inFlight.delete(item.key);
@@ -194,8 +213,7 @@ function translateConfirmedLines() {
 }
 
 async function translateAllLines() {
-  const lines = getAllLines().filter((line, index, all) => line.trim() || index < all.length - 1);
-  const targets = lines
+  const targets = getAllLines()
     .map((text, index) => ({ text, index, key: lineKey(index, text) }))
     .filter((item) => item.text.trim());
 
@@ -206,6 +224,7 @@ async function translateAllLines() {
 
   const serial = ++requestSerial;
   targets.forEach((item) => {
+    failed.delete(item.key);
     inFlight.set(item.key, serial);
   });
   setMessage('');
@@ -218,12 +237,18 @@ async function translateAllLines() {
         const item = chunk[index];
         if (inFlight.get(item.key) === serial) {
           translations.set(item.key, translated || '');
+          failed.delete(item.key);
         }
       });
     }
     setMessage('全体を変換しました。');
   } catch (error) {
-    setMessage('');
+    targets.forEach((item) => {
+      if (inFlight.get(item.key) === serial && !translations.has(item.key)) {
+        failed.set(item.key, true);
+      }
+    });
+    setMessage(error?.message || '変換に失敗しました。', true);
   } finally {
     targets.forEach((item) => {
       if (inFlight.get(item.key) === serial) inFlight.delete(item.key);
@@ -248,6 +273,30 @@ async function copyResult() {
   setMessage('変換結果をコピーしました。');
 }
 
+function clearAll() {
+  sourceText.value = '';
+  translations.clear();
+  inFlight.clear();
+  failed.clear();
+  requestSerial += 1;
+  setMessage('入力をクリアしました。');
+  resizeSourceText();
+  render();
+  sourceText.focus();
+}
+
+convertAllButton.addEventListener('click', () => {
+  void translateAllLines();
+});
+
+copyButton.addEventListener('click', () => {
+  void copyResult();
+});
+
+clearButton.addEventListener('click', () => {
+  clearAll();
+});
+
 sourceText.addEventListener('input', () => {
   setMessage('');
   translateConfirmedLines();
@@ -257,19 +306,6 @@ sourceText.addEventListener('input', () => {
 
 window.addEventListener('resize', () => {
   resizeSourceText();
-});
-
-convertAllButton.addEventListener('click', translateAllLines);
-copyButton.addEventListener('click', copyResult);
-clearButton.addEventListener('click', () => {
-  sourceText.value = '';
-  translations.clear();
-  inFlight.clear();
-  failed.clear();
-  setMessage('');
-  resizeSourceText();
-  render();
-  sourceText.focus();
 });
 
 resizeSourceText();

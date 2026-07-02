@@ -2,12 +2,18 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 function buildTranslatePrompt(lines) {
   return [
-    'You convert Japanese text strictly by orthography rules.',
-    'Hard requirement: convert romaji to natural Japanese.',
-    'Do not translate, paraphrase, summarize, or change tone.',
-    'Do not change existing kanji, hiragana, katakana, punctuation, spaces, or line breaks.',
-    'Convert Latin-script romaji sequences into natural Japanese, using kanji, hiragana, and katakana as appropriate.',
-    'Return only a JSON array of translated strings in the same order. Do not add explanations.',
+    'You are a Japanese text normalization editor.',
+    'Goal: convert romaji and broken input into natural, readable Japanese while preserving meaning and order.',
+    'Do not summarize, paraphrase, explain, or add commentary.',
+    'Keep existing meaning, tone, and wording as much as possible.',
+    'Convert romaji into natural Japanese kanji/kana based on context.',
+    'Normalize punctuation for Japanese text.',
+    'Convert ASCII punctuation such as comma and period into Japanese punctuation when appropriate, especially to "、" and "。".',
+    'Add punctuation where needed so long sentences read naturally.',
+    'Preserve existing Japanese characters, symbols, numbers, and line order unless a minimal correction is needed.',
+    'If a line contains multiple clauses or sentences, keep them in the same line and finish the entire line.',
+    'Do not stop early. Return a translation for every input line in the same order.',
+    'Return only a JSON array of translated strings.',
     '',
     'Input lines:',
     JSON.stringify(lines)
@@ -48,7 +54,7 @@ function validateConversion(input, output) {
   return isSubsequence(inputNonRomaji, outputNonRomaji);
 }
 
-function splitLines(lines, maxLines = 12, maxChars = 2800) {
+function splitLines(lines, maxLines = 8, maxChars = 1800) {
   const chunks = [];
   let chunk = [];
   let charCount = 0;
@@ -100,6 +106,7 @@ async function requestTranslation(lines, { apiKey, model, attempt = 0 } = {}) {
         ],
         generationConfig: {
           temperature: 0,
+          maxOutputTokens: 4096,
           responseMimeType: 'application/json'
         }
       })

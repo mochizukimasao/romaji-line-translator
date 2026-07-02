@@ -6,13 +6,13 @@ export async function onRequestPost(context) {
     const body = await request.json().catch(() => ({}));
     const lines = Array.isArray(body?.lines) ? body.lines : [];
 
-    if (!lines.length || lines.length > 200) {
-      return Response.json({ error: '1〜200行の入力を送ってください。' }, { status: 400 });
+    if (!lines.length || lines.length > 1000) {
+      return Response.json({ error: '1〜1000行の入力を送ってください。' }, { status: 400 });
     }
 
-    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 1000));
+    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 4000));
     const totalLength = normalizedLines.join('\n').length;
-    if (totalLength > 30000) {
+    if (totalLength > 120000) {
       return Response.json({ error: '入力が長すぎます。少し分けて変換してください。' }, { status: 400 });
     }
 
