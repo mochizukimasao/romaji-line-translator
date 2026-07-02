@@ -339,7 +339,7 @@ button:disabled {
   color: var(--danger);
 }
 
-@media (max-width: 960px) {
+@media (max-width: 720px) {
   .workspace {
     grid-template-columns: 1fr;
   }

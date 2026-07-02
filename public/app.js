@@ -27,26 +27,21 @@ function isWhitespace(char) {
   return char === ' ' || char === '\t' || char === '\r';
 }
 
-function getInputSegments() {
-  const text = sourceText.value;
-  if (!text) return [];
+function getSourceLines() {
+  if (!sourceText.value) return [];
+  return sourceText.value.split('\n');
+}
 
+function splitLineIntoSegments(text) {
   const segments = [];
   let cursor = 0;
 
   while (cursor < text.length) {
     let end = cursor;
     let isConfirmed = false;
-    let joiner = '';
 
     while (end < text.length) {
       const char = text[end];
-      if (char === '\n') {
-        isConfirmed = true;
-        joiner = '\n';
-        break;
-      }
-
       if (sentenceBoundaries.has(char)) {
         isConfirmed = true;
         end += 1;
@@ -59,40 +54,43 @@ function getInputSegments() {
       end += 1;
     }
 
-    if (!isConfirmed && end >= text.length) {
-      const segmentText = text.slice(cursor);
-      if (segmentText.trim()) {
-        segments.push({
-          index: segments.length,
-          text: segmentText,
-          isConfirmed: false,
-          joiner: ''
-        });
-      }
-      break;
-    }
-
     const segmentText = text.slice(cursor, end);
     if (segmentText.trim() || isConfirmed) {
       segments.push({
         index: segments.length,
         text: segmentText,
-        isConfirmed,
-        joiner
+        isConfirmed
       });
     }
 
-    cursor = joiner === '\n' ? end + 1 : end;
+    if (end >= text.length) break;
+
+    cursor = end;
     while (cursor < text.length && isWhitespace(text[cursor])) {
       cursor += 1;
     }
   }
 
+  if (!segments.length && text.trim()) {
+    segments.push({
+      index: 0,
+      text,
+      isConfirmed: false
+    });
+  }
+
   return segments;
 }
 
-function getConfirmedSegmentCount() {
-  return getInputSegments().filter((segment) => segment.isConfirmed).length;
+function getDisplayEntries() {
+  return getSourceLines()
+    .map((text, index) => ({
+      index,
+      text,
+      segments: splitLineIntoSegments(text),
+      isConfirmed: index < getSourceLines().length - 1
+    }))
+    .filter((entry) => entry.text.trim());
 }
 
 function resizeSourceText() {
@@ -105,12 +103,8 @@ function setMessage(text = '', isError = false) {
   message.classList.toggle('error', isError);
 }
 
-function lineKey(index, text) {
-  return `${index}:${text}`;
-}
-
-function getDisplayEntries() {
-  return getInputSegments().filter((entry) => entry.isConfirmed || entry.text.trim());
+function segmentKey(lineIndex, segmentIndex, text) {
+  return `${lineIndex}:${segmentIndex}:${text}`;
 }
 
 function splitTargets(targets, maxLines = 12, maxChars = 2800) {
@@ -139,25 +133,40 @@ function splitTargets(targets, maxLines = 12, maxChars = 2800) {
 
 function getTotalChars(displayLines) {
   return displayLines.reduce((sum, line, index) => {
-    const key = lineKey(line.index, line.text);
-    return sum + (translations.get(key)?.length || 0);
+    return (
+      sum +
+      line.segments.reduce((lineSum, segment) => {
+        const key = segmentKey(line.index, segment.index, segment.text);
+        return lineSum + (translations.get(key)?.length || 0);
+      }, 0)
+    );
   }, 0);
 }
 
-function getEntry(index, text, isConfirmed) {
-  const key = lineKey(index, text);
-  if (inFlight.has(key)) return { status: 'loading', text: translations.get(key) || '' };
-  if (translations.has(key)) return { status: 'done', text: translations.get(key) };
-  if (failed.has(key)) return { status: 'error', text: '変換に失敗しました' };
-  return { status: isConfirmed ? 'pending' : 'pending', text: '' };
+function getLineStatus(line) {
+  const keys = line.segments.map((segment) => segmentKey(line.index, segment.index, segment.text));
+  if (keys.some((key) => inFlight.has(key))) return 'loading';
+  if (keys.some((key) => failed.has(key))) return 'error';
+  if (keys.length && keys.every((key) => translations.has(key))) return 'done';
+  return line.isConfirmed ? 'pending' : 'pending';
+}
+
+function getLineText(line) {
+  return line.segments
+    .map((segment) => {
+      const key = segmentKey(line.index, segment.index, segment.text);
+      if (translations.has(key)) return translations.get(key) || '';
+      return '...';
+    })
+    .join('');
 }
 
 function render() {
   const displayEntries = getDisplayEntries();
-  const doneCount = displayEntries.filter((entry) => translations.has(lineKey(entry.index, entry.text))).length;
+  const doneCount = displayEntries.filter((entry) => getLineStatus(entry) === 'done').length;
   const totalCharCount = getTotalChars(displayEntries);
 
-  lineCount.textContent = `${getInputSegments().length} 区切り`;
+  lineCount.textContent = `${displayEntries.length} 行`;
   convertedCount.textContent = `${doneCount} / ${displayEntries.length}`;
   totalChars.textContent = `${totalCharCount} 文字`;
   globalStatus.textContent = inFlight.size ? '変換中' : '待機中';
@@ -165,14 +174,13 @@ function render() {
 
   if (!displayEntries.length) {
     results.className = 'results empty';
-    results.textContent = '句読点や改行で確定した区切りから変換結果が表示されます。';
+    results.textContent = '改行で確定した行だけが表示されます。句読点は行内の区切りとして扱います。';
     return;
   }
 
   results.className = 'results';
   results.replaceChildren(
     ...displayEntries.map((entry) => {
-      const translatedEntry = getEntry(entry.index, entry.text, entry.isConfirmed);
       const row = document.createElement('div');
       row.className = 'result-row';
 
@@ -182,11 +190,12 @@ function render() {
 
       const text = document.createElement('div');
       text.className = 'translated-text';
-      text.textContent = translatedEntry.text || (entry.isConfirmed ? '...' : '句読点で確定');
+      text.textContent = getLineText(entry) || '...';
 
       const status = document.createElement('div');
-      status.className = `row-status ${translatedEntry.status}`;
-      status.textContent = entry.isConfirmed ? statusLabels[translatedEntry.status] : '未確定';
+      const statusValue = getLineStatus(entry);
+      status.className = `row-status ${statusValue}`;
+      status.textContent = statusLabels[statusValue];
 
       row.append(number, text, status);
       return row;
@@ -249,24 +258,32 @@ async function translateTargets(targets, successMessage = '') {
 }
 
 function translateConfirmedLines() {
-  const segments = getInputSegments();
+  const entries = getDisplayEntries();
   const targets = [];
 
-  for (const segment of segments) {
-    if (!segment.isConfirmed || !segment.text.trim()) continue;
+  for (const entry of entries) {
+    for (const segment of entry.segments) {
+      if (!segment.isConfirmed || !segment.text.trim()) continue;
 
-    const key = lineKey(segment.index, segment.text);
-    if (translations.has(key) || inFlight.has(key)) continue;
+      const key = segmentKey(entry.index, segment.index, segment.text);
+      if (translations.has(key) || inFlight.has(key)) continue;
 
-    targets.push({ text: segment.text, index: segment.index, key });
+      targets.push({ text: segment.text, index: entry.index, key });
+    }
   }
 
   void translateTargets(targets);
 }
 
 async function translateAllLines() {
-  const targets = getInputSegments()
-    .map((segment) => ({ text: segment.text, index: segment.index, key: lineKey(segment.index, segment.text) }))
+  const targets = getDisplayEntries()
+    .flatMap((entry) =>
+      entry.segments.map((segment) => ({
+        text: segment.text,
+        index: entry.index,
+        key: segmentKey(entry.index, segment.index, segment.text)
+      }))
+    )
     .filter((item) => item.text.trim());
 
   if (!targets.length) {
@@ -310,10 +327,13 @@ async function translateAllLines() {
 }
 
 async function copyResult() {
-  const segments = getInputSegments();
-  const output = segments
-    .map((segment) => `${translations.get(lineKey(segment.index, segment.text)) || ''}${segment.joiner}`)
-    .join('')
+  const output = getDisplayEntries()
+    .map((entry) =>
+      entry.segments
+        .map((segment) => translations.get(segmentKey(entry.index, segment.index, segment.text)) || '')
+        .join('')
+    )
+    .join('\n')
     .trimEnd();
 
   if (!output.trim()) {
