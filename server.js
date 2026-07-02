@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import { translateRomajiLines } from './src/lib/gemini.js';
+import { translateTextLines } from './src/lib/gemini.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -12,6 +12,7 @@ app.use(express.static('public'));
 app.post('/api/translate', async (req, res) => {
   try {
     const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    const mode = req.body?.mode === 'japanese' ? 'japanese' : 'romaji';
     if (!lines.length || lines.length > 1000) {
       return res.status(400).json({ error: '1〜1000行の入力を送ってください。' });
     }
@@ -22,9 +23,10 @@ app.post('/api/translate', async (req, res) => {
       return res.status(400).json({ error: '入力が長すぎます。少し分けて変換してください。' });
     }
 
-    const translations = await translateRomajiLines(normalizedLines, {
+    const translations = await translateTextLines(normalizedLines, {
       apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      mode
     });
 
     res.json({ translations });

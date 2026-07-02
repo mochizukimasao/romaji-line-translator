@@ -1,10 +1,11 @@
-import { translateRomajiLines } from '../../src/lib/gemini.js';
+import { translateTextLines } from '../../src/lib/gemini.js';
 
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
     const body = await request.json().catch(() => ({}));
     const lines = Array.isArray(body?.lines) ? body.lines : [];
+    const mode = body?.mode === 'japanese' ? 'japanese' : 'romaji';
 
     if (!lines.length || lines.length > 1000) {
       return Response.json({ error: '1〜1000行の入力を送ってください。' }, { status: 400 });
@@ -16,9 +17,10 @@ export async function onRequestPost(context) {
       return Response.json({ error: '入力が長すぎます。少し分けて変換してください。' }, { status: 400 });
     }
 
-    const translations = await translateRomajiLines(normalizedLines, {
+    const translations = await translateTextLines(normalizedLines, {
       apiKey: env.GEMINI_API_KEY,
-      model: env.GEMINI_MODEL || 'gemini-2.5-flash'
+      model: env.GEMINI_MODEL || 'gemini-2.5-flash',
+      mode
     });
 
     return Response.json({ translations });

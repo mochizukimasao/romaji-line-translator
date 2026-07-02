@@ -8,13 +8,26 @@ const message = document.querySelector('#message');
 const convertAllButton = document.querySelector('#convertAll');
 const copyButton = document.querySelector('#copyResult');
 const clearButton = document.querySelector('#clearAll');
+const modeHint = document.querySelector('#modeHint');
+const modeButtons = Array.from(document.querySelectorAll('[data-mode]'));
 
 const translations = new Map();
 const inFlight = new Map();
 const failed = new Map();
 let requestSerial = 0;
+let currentMode = 'romaji';
 
 const sentenceBoundaries = new Set(['.', ',', '?', '!', '。', '、', '，', '？', '！']);
+const modeMeta = {
+  romaji: {
+    hint: '句読点・改行で確定',
+    placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?'
+  },
+  japanese: {
+    hint: '改行で確定',
+    placeholder: 'きょう は いい てんきだ でも すこし さむい'
+  }
+};
 
 const statusLabels = {
   pending: '未確定',
@@ -32,7 +45,17 @@ function getSourceLines() {
   return sourceText.value.split('\n');
 }
 
-function splitLineIntoSegments(text) {
+function splitLineIntoSegments(text, mode, isLastLine) {
+  if (mode === 'japanese') {
+    return text.trim()
+      ? [{
+          index: 0,
+          text,
+          isConfirmed: !isLastLine
+        }]
+      : [];
+  }
+
   const segments = [];
   let cursor = 0;
 
@@ -83,12 +106,12 @@ function splitLineIntoSegments(text) {
 }
 
 function getDisplayEntries() {
-  return getSourceLines()
+  const lines = getSourceLines();
+  return lines
     .map((text, index) => ({
       index,
       text,
-      segments: splitLineIntoSegments(text),
-      isConfirmed: index < getSourceLines().length - 1
+      segments: splitLineIntoSegments(text, currentMode, index === lines.length - 1)
     }))
     .filter((entry) => entry.text.trim());
 }
@@ -104,7 +127,7 @@ function setMessage(text = '', isError = false) {
 }
 
 function segmentKey(lineIndex, segmentIndex, text) {
-  return `${lineIndex}:${segmentIndex}:${text}`;
+  return `${currentMode}:${lineIndex}:${segmentIndex}:${text}`;
 }
 
 function splitTargets(targets, maxLines = 12, maxChars = 2800) {
@@ -148,7 +171,7 @@ function getLineStatus(line) {
   if (keys.some((key) => inFlight.has(key))) return 'loading';
   if (keys.some((key) => failed.has(key))) return 'error';
   if (keys.length && keys.every((key) => translations.has(key))) return 'done';
-  return line.isConfirmed ? 'pending' : 'pending';
+  return 'pending';
 }
 
 function getLineText(line) {
@@ -170,11 +193,14 @@ function render() {
   convertedCount.textContent = `${doneCount} / ${displayEntries.length}`;
   totalChars.textContent = `${totalCharCount} 文字`;
   globalStatus.textContent = inFlight.size ? '変換中' : '待機中';
+  modeHint.textContent = modeMeta[currentMode].hint;
   convertAllButton.disabled = inFlight.size > 0;
 
   if (!displayEntries.length) {
     results.className = 'results empty';
-    results.textContent = '改行で確定した行だけが表示されます。句読点は行内の区切りとして扱います。';
+    results.textContent = currentMode === 'japanese'
+      ? '改行で確定した行から日本語整形結果が表示されます。'
+      : '改行で確定した行だけが表示されます。句読点は行内の区切りとして扱います。';
     return;
   }
 
@@ -205,11 +231,11 @@ function render() {
   resizeSourceText();
 }
 
-async function requestTranslation(lines) {
+async function requestTranslation(lines, { mode = currentMode } = {}) {
   const response = await fetch('/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lines })
+    body: JSON.stringify({ lines, mode })
   });
 
   const data = await response.json().catch(() => ({}));
@@ -223,6 +249,7 @@ async function translateTargets(targets, successMessage = '') {
   if (!targets.length) return;
 
   const serial = ++requestSerial;
+  const mode = currentMode;
   targets.forEach((item) => {
     failed.delete(item.key);
     inFlight.set(item.key, serial);
@@ -232,7 +259,7 @@ async function translateTargets(targets, successMessage = '') {
 
   try {
     for (const chunk of splitTargets(targets)) {
-      const translatedLines = await requestTranslation(chunk.map((item) => item.text));
+      const translatedLines = await requestTranslation(chunk.map((item) => item.text), { mode });
       translatedLines.forEach((translated, index) => {
         const item = chunk[index];
         if (inFlight.get(item.key) === serial) {
@@ -292,6 +319,7 @@ async function translateAllLines() {
   }
 
   const serial = ++requestSerial;
+  const mode = currentMode;
   targets.forEach((item) => {
     failed.delete(item.key);
     inFlight.set(item.key, serial);
@@ -301,7 +329,7 @@ async function translateAllLines() {
 
   try {
     for (const chunk of splitTargets(targets)) {
-      const translatedLines = await requestTranslation(chunk.map((item) => item.text));
+      const translatedLines = await requestTranslation(chunk.map((item) => item.text), { mode });
       translatedLines.forEach((translated, index) => {
         const item = chunk[index];
         if (inFlight.get(item.key) === serial) {
@@ -357,6 +385,25 @@ function clearAll() {
   sourceText.focus();
 }
 
+function setMode(nextMode) {
+  if (nextMode === currentMode) return;
+  currentMode = nextMode;
+  translations.clear();
+  inFlight.clear();
+  failed.clear();
+  requestSerial += 1;
+
+  modeButtons.forEach((button) => {
+    const isActive = button.dataset.mode === currentMode;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+  });
+
+  sourceText.placeholder = modeMeta[currentMode].placeholder;
+  setMessage(`${currentMode === 'japanese' ? '日本語整形' : 'ローマ字変換'}モードに切り替えました。`);
+  render();
+}
+
 convertAllButton.addEventListener('click', () => {
   void translateAllLines();
 });
@@ -367,6 +414,12 @@ copyButton.addEventListener('click', () => {
 
 clearButton.addEventListener('click', () => {
   clearAll();
+});
+
+modeButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji');
+  });
 });
 
 sourceText.addEventListener('input', () => {

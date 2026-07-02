@@ -15,7 +15,7 @@
           <div>
             <div class="eyebrow">Romaji Line Translator</div>
             <h1>Romaji Line Translator</h1>
-            <p class="description">句読点や改行で確定した区切りだけを、ローマ字からかなへそのまま変換します。</p>
+            <p class="description">ローマ字変換と日本語整形を、句読点や改行で区切りながらそのまま変換します。</p>
           </div>
         </div>
         <div class="topbar-tools">
@@ -30,6 +30,14 @@
         </div>
       </section>
 
+      <section class="mode-switch" aria-label="変換モード">
+        <div class="mode-switch-label">変換モード</div>
+        <div class="mode-switch-group" role="tablist" aria-label="変換モード">
+          <button id="modeRomaji" class="mode-button active" type="button" data-mode="romaji" role="tab" aria-selected="true">ローマ字変換</button>
+          <button id="modeJapanese" class="mode-button" type="button" data-mode="japanese" role="tab" aria-selected="false">日本語整形</button>
+        </div>
+      </section>
+
       <section class="workspace" aria-label="かな変換ワークスペース">
         <div class="panel input-panel">
           <div class="panel-header">
@@ -37,7 +45,7 @@
             <div class="meta-row">
               <span id="lineCount">0 区切り</span>
               <span class="divider">•</span>
-              <span>句読点・改行で確定</span>
+              <span id="modeHint">句読点・改行で確定</span>
             </div>
           </div>
           <textarea

@@ -84,6 +84,46 @@ body::before {
   gap: 8px;
 }
 
+.mode-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.015);
+}
+
+.mode-switch-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mode-switch-group {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.mode-button.active {
+  border-color: rgba(46, 214, 196, 0.35);
+  background: rgba(46, 214, 196, 0.16);
+  color: #e8fffb;
+}
+
 .brand {
   display: flex;
   align-items: flex-start;
@@ -370,6 +410,11 @@ button:disabled {
   .app-shell {
     width: min(100% - 16px, 1200px);
     padding-top: 14px;
+  }
+
+  .mode-switch {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .topbar {
