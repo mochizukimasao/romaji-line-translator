@@ -15,7 +15,7 @@
           <div>
             <div class="eyebrow">Romaji Line Translator</div>
             <h1>Romaji Line Translator</h1>
-            <p class="description">改行で確定した行だけを、ローマ字からかなへそのまま変換します。</p>
+            <p class="description">句読点や改行で確定した区切りだけを、ローマ字からかなへそのまま変換します。</p>
           </div>
         </div>
         <div class="topbar-tools">
@@ -35,14 +35,14 @@
           <div class="panel-header">
             <label for="sourceText">入力</label>
             <div class="meta-row">
-              <span id="lineCount">0 行</span>
+              <span id="lineCount">0 区切り</span>
               <span class="divider">•</span>
-              <span>改行で確定</span>
+              <span>句読点・改行で確定</span>
             </div>
           </div>
           <textarea
             id="sourceText"
-            placeholder="otukaresamadesu&#10;ashita no yotei wo kakunin shitai"
+            placeholder="otukaresamadesu.&#10;ashita no yotei wo kakunin shitai?"
             spellcheck="false"
           ></textarea>
         </div>
@@ -56,7 +56,7 @@
               <span id="totalChars">0 文字</span>
             </div>
           </div>
-          <div id="results" class="results empty">改行で確定した行からかな変換結果が表示されます。</div>
+          <div id="results" class="results empty">句読点や改行で確定した区切りからかな変換結果が表示されます。</div>
         </div>
       </section>
 

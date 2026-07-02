@@ -10,12 +10,13 @@ function buildTranslatePrompt(lines) {
     'Normalize punctuation for Japanese text.',
     'Convert ASCII punctuation such as comma and period into Japanese punctuation when appropriate, especially to "、" and "。".',
     'Add punctuation where needed so long sentences read naturally.',
+    'Treat punctuation and line breaks as boundaries between input segments, but finish each segment naturally and completely.',
     'Preserve existing Japanese characters, symbols, numbers, and line order unless a minimal correction is needed.',
-    'If a line contains multiple clauses or sentences, keep them in the same line and finish the entire line.',
-    'Do not stop early. Return a translation for every input line in the same order.',
+    'If a segment contains multiple clauses or sentences, keep them in the same segment and finish the entire segment.',
+    'Do not stop early. Return a translation for every input segment in the same order.',
     'Return only a JSON array of translated strings.',
     '',
-    'Input lines:',
+    'Input segments:',
     JSON.stringify(lines)
   ].join('\n');
 }
@@ -32,26 +33,14 @@ function safeString(value) {
   return String(value ?? '');
 }
 
-function isSubsequence(needle, haystack) {
-  let cursor = 0;
-  for (const char of haystack) {
-    if (char === needle[cursor]) {
-      cursor += 1;
-      if (cursor === needle.length) return true;
-    }
-  }
-  return needle.length === 0;
-}
-
 function validateConversion(input, output) {
-  const inputText = safeString(input);
   const outputText = safeString(output);
   if (!outputText) return false;
-
-  const inputNonRomaji = inputText.replace(/[A-Za-z]+(?:'[A-Za-z]+)*/g, '');
-  const outputNonRomaji = outputText.replace(/[A-Za-z]+(?:'[A-Za-z]+)*/g, '');
-
-  return isSubsequence(inputNonRomaji, outputNonRomaji);
+  if (/[A-Za-z]/.test(outputText)) return false;
+  if (!/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}0-9。、！？]/u.test(outputText)) {
+    return false;
+  }
+  return outputText.trim().length > 0;
 }
 
 function splitLines(lines, maxLines = 8, maxChars = 1800) {

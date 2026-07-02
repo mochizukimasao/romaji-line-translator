@@ -14,6 +14,8 @@ const inFlight = new Map();
 const failed = new Map();
 let requestSerial = 0;
 
+const sentenceBoundaries = new Set(['.', ',', '?', '!', '。', '、', '，', '？', '！']);
+
 const statusLabels = {
   pending: '未確定',
   loading: '変換中',
@@ -21,13 +23,76 @@ const statusLabels = {
   error: '失敗'
 };
 
-function getAllLines() {
-  return sourceText.value.split('\n');
+function isWhitespace(char) {
+  return char === ' ' || char === '\t' || char === '\r';
 }
 
-function getConfirmedLineCount() {
-  const lines = getAllLines();
-  return Math.max(lines.length - 1, 0);
+function getInputSegments() {
+  const text = sourceText.value;
+  if (!text) return [];
+
+  const segments = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    let end = cursor;
+    let isConfirmed = false;
+    let joiner = '';
+
+    while (end < text.length) {
+      const char = text[end];
+      if (char === '\n') {
+        isConfirmed = true;
+        joiner = '\n';
+        break;
+      }
+
+      if (sentenceBoundaries.has(char)) {
+        isConfirmed = true;
+        end += 1;
+        while (end < text.length && sentenceBoundaries.has(text[end])) {
+          end += 1;
+        }
+        break;
+      }
+
+      end += 1;
+    }
+
+    if (!isConfirmed && end >= text.length) {
+      const segmentText = text.slice(cursor);
+      if (segmentText.trim()) {
+        segments.push({
+          index: segments.length,
+          text: segmentText,
+          isConfirmed: false,
+          joiner: ''
+        });
+      }
+      break;
+    }
+
+    const segmentText = text.slice(cursor, end);
+    if (segmentText.trim() || isConfirmed) {
+      segments.push({
+        index: segments.length,
+        text: segmentText,
+        isConfirmed,
+        joiner
+      });
+    }
+
+    cursor = joiner === '\n' ? end + 1 : end;
+    while (cursor < text.length && isWhitespace(text[cursor])) {
+      cursor += 1;
+    }
+  }
+
+  return segments;
+}
+
+function getConfirmedSegmentCount() {
+  return getInputSegments().filter((segment) => segment.isConfirmed).length;
 }
 
 function resizeSourceText() {
@@ -45,16 +110,7 @@ function lineKey(index, text) {
 }
 
 function getDisplayEntries() {
-  const lines = getAllLines();
-  const confirmedCount = getConfirmedLineCount();
-
-  return lines
-    .map((text, index) => ({
-      index,
-      text,
-      isConfirmed: index < confirmedCount
-    }))
-    .filter((entry) => entry.isConfirmed || entry.text.trim());
+  return getInputSegments().filter((entry) => entry.isConfirmed || entry.text.trim());
 }
 
 function splitTargets(targets, maxLines = 12, maxChars = 2800) {
@@ -97,13 +153,11 @@ function getEntry(index, text, isConfirmed) {
 }
 
 function render() {
-  const lines = getAllLines();
-  const confirmedCount = getConfirmedLineCount();
   const displayEntries = getDisplayEntries();
   const doneCount = displayEntries.filter((entry) => translations.has(lineKey(entry.index, entry.text))).length;
   const totalCharCount = getTotalChars(displayEntries);
 
-  lineCount.textContent = `${lines.length} 行`;
+  lineCount.textContent = `${getInputSegments().length} 区切り`;
   convertedCount.textContent = `${doneCount} / ${displayEntries.length}`;
   totalChars.textContent = `${totalCharCount} 文字`;
   globalStatus.textContent = inFlight.size ? '変換中' : '待機中';
@@ -111,7 +165,7 @@ function render() {
 
   if (!displayEntries.length) {
     results.className = 'results empty';
-    results.textContent = '改行で確定した行から変換結果が表示されます。';
+    results.textContent = '句読点や改行で確定した区切りから変換結果が表示されます。';
     return;
   }
 
@@ -128,7 +182,7 @@ function render() {
 
       const text = document.createElement('div');
       text.className = 'translated-text';
-      text.textContent = translatedEntry.text || (entry.isConfirmed ? '...' : '改行で確定');
+      text.textContent = translatedEntry.text || (entry.isConfirmed ? '...' : '句読点で確定');
 
       const status = document.createElement('div');
       status.className = `row-status ${translatedEntry.status}`;
@@ -195,26 +249,24 @@ async function translateTargets(targets, successMessage = '') {
 }
 
 function translateConfirmedLines() {
-  const lines = getAllLines();
-  const confirmedCount = getConfirmedLineCount();
+  const segments = getInputSegments();
   const targets = [];
 
-  for (let index = 0; index < confirmedCount; index += 1) {
-    const text = lines[index];
-    if (!text.trim()) continue;
+  for (const segment of segments) {
+    if (!segment.isConfirmed || !segment.text.trim()) continue;
 
-    const key = lineKey(index, text);
+    const key = lineKey(segment.index, segment.text);
     if (translations.has(key) || inFlight.has(key)) continue;
 
-    targets.push({ text, index, key });
+    targets.push({ text: segment.text, index: segment.index, key });
   }
 
   void translateTargets(targets);
 }
 
 async function translateAllLines() {
-  const targets = getAllLines()
-    .map((text, index) => ({ text, index, key: lineKey(index, text) }))
+  const targets = getInputSegments()
+    .map((segment) => ({ text: segment.text, index: segment.index, key: lineKey(segment.index, segment.text) }))
     .filter((item) => item.text.trim());
 
   if (!targets.length) {
@@ -258,10 +310,10 @@ async function translateAllLines() {
 }
 
 async function copyResult() {
-  const lines = getAllLines();
-  const output = lines
-    .map((line, index) => translations.get(lineKey(index, line)) || '')
-    .join('\n')
+  const segments = getInputSegments();
+  const output = segments
+    .map((segment) => `${translations.get(lineKey(segment.index, segment.text)) || ''}${segment.joiner}`)
+    .join('')
     .trimEnd();
 
   if (!output.trim()) {
