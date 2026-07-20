@@ -22,6 +22,8 @@ const copyButton = document.querySelector('#copyResult');
 const clearButton = document.querySelector('#clearAll');
 const modeHint = document.querySelector('#modeHint');
 const modeButtons = Array.from(document.querySelectorAll('[data-mode]'));
+const heightButtons = Array.from(document.querySelectorAll('[data-height]'));
+const DISPLAY_HEIGHT_STORAGE_KEY = 'romaji-line-translator.display-height';
 
 const modeMeta = {
   romaji: { hint: '句読点・改行で確定', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
@@ -33,6 +35,15 @@ let requestVersion = 0;
 let requestSerial = 0;
 let documentModel = buildDocument('', currentMode, requestVersion);
 let state = new Map();
+let displayHeight = readDisplayHeight();
+
+function readDisplayHeight() {
+  try {
+    return localStorage.getItem(DISPLAY_HEIGHT_STORAGE_KEY) === 'fixed' ? 'fixed' : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
 
 function setMessage(text = '', isError = false) {
   message.textContent = text;
@@ -57,8 +68,29 @@ function rebuildDocument() {
 }
 
 function resizeSourceText() {
+  if (displayHeight === 'fixed' && window.innerWidth > 720) {
+    sourceText.style.height = '';
+    return;
+  }
   sourceText.style.height = 'auto';
   sourceText.style.height = `${Math.max(sourceText.scrollHeight, 180)}px`;
+}
+
+function setDisplayHeight(nextHeight, announce = false) {
+  displayHeight = nextHeight === 'fixed' ? 'fixed' : 'auto';
+  document.body.classList.toggle('fixed-height', displayHeight === 'fixed');
+  heightButtons.forEach((button) => {
+    const selected = button.dataset.height === displayHeight;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  try {
+    localStorage.setItem(DISPLAY_HEIGHT_STORAGE_KEY, displayHeight);
+  } catch {
+    // 表示設定を保存できない環境でも、現在の選択は反映する。
+  }
+  resizeSourceText();
+  if (announce) setMessage(`${displayHeight === 'fixed' ? '固定' : '自動伸長'}表示に切り替えました。`);
 }
 
 function render() {
@@ -222,6 +254,7 @@ convertAllButton.addEventListener('click', translateAll);
 copyButton.addEventListener('click', () => void copyResult());
 clearButton.addEventListener('click', clearAll);
 modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji')));
+heightButtons.forEach((button) => button.addEventListener('click', () => setDisplayHeight(button.dataset.height, true)));
 sourceText.addEventListener('input', () => {
   rebuildDocument();
   setMessage('');
@@ -229,5 +262,7 @@ sourceText.addEventListener('input', () => {
   translateConfirmed();
 });
 
+window.addEventListener('resize', resizeSourceText);
+setDisplayHeight(displayHeight);
 resizeSourceText();
 render();

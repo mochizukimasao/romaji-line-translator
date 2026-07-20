@@ -105,6 +105,13 @@ body::before {
   letter-spacing: 0.02em;
 }
 
+.setting-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .mode-switch-group {
   display: inline-flex;
   gap: 8px;
@@ -122,6 +129,25 @@ body::before {
   border-color: rgba(46, 214, 196, 0.35);
   background: rgba(46, 214, 196, 0.16);
   color: #e8fffb;
+}
+
+@media (min-width: 721px) {
+  body.fixed-height .input-panel,
+  body.fixed-height .output-panel {
+    height: 500px;
+  }
+
+  body.fixed-height textarea {
+    height: 444px;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  body.fixed-height .results {
+    height: 444px;
+    min-height: 0;
+    overflow-y: auto;
+  }
 }
 
 .brand {
@@ -463,6 +489,11 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .mode-switch {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .workspace > .controls {
     grid-column: 1;
     grid-row: auto;
@@ -484,6 +515,13 @@ button:disabled {
   .mode-switch {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .setting-block {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
   }
 
   .topbar {

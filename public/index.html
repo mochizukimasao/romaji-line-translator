@@ -30,11 +30,20 @@
         </div>
       </section>
 
-      <section class="mode-switch" aria-label="変換モード">
-        <div class="mode-switch-label">変換モード</div>
-        <div class="mode-switch-group" role="tablist" aria-label="変換モード">
-          <button id="modeRomaji" class="mode-button active" type="button" data-mode="romaji" role="tab" aria-selected="true">ローマ字変換</button>
-          <button id="modeJapanese" class="mode-button" type="button" data-mode="japanese" role="tab" aria-selected="false">日本語整形</button>
+      <section class="mode-switch" aria-label="変換設定">
+        <div class="setting-block">
+          <div class="mode-switch-label">変換モード</div>
+          <div class="mode-switch-group" role="tablist" aria-label="変換モード">
+            <button id="modeRomaji" class="mode-button active" type="button" data-mode="romaji" role="tab" aria-selected="true">ローマ字変換</button>
+            <button id="modeJapanese" class="mode-button" type="button" data-mode="japanese" role="tab" aria-selected="false">日本語整形</button>
+          </div>
+        </div>
+        <div class="setting-block">
+          <div class="mode-switch-label">表示高さ</div>
+          <div class="mode-switch-group" role="group" aria-label="表示高さ">
+            <button id="heightAuto" class="mode-button height-button active" type="button" data-height="auto" aria-pressed="true">自動伸長</button>
+            <button id="heightFixed" class="mode-button height-button" type="button" data-height="fixed" aria-pressed="false">固定</button>
+          </div>
         </div>
       </section>
 
