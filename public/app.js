@@ -112,7 +112,11 @@ function render() {
   convertedCount.textContent = `${done} / ${items.length}`;
   totalChars.textContent = `${items.reduce((sum, item) => sum + (getItem(item).output || '').length, 0)} 文字`;
   const status = getDocumentStatus(documentModel, getItem);
-  globalStatus.textContent = { loading: '変換中', error: '一部失敗', draft: '未確定', done: '完了' }[status] || '待機中';
+  const statusText = { loading: '変換中', error: '一部失敗', draft: '未確定', done: '完了' }[status] || '待機中';
+  globalStatus.textContent = statusText;
+  globalStatus.className = `status-pill status-${status || 'pending'}`;
+  globalStatus.dataset.tooltip = `状態: ${statusText}`;
+  globalStatus.setAttribute('aria-label', `状態: ${statusText}`);
   modeHint.textContent = modeMeta[currentMode].hint;
   convertAllButton.disabled = status === 'loading';
 

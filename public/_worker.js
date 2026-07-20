@@ -3,9 +3,10 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 
 // ../src/lib/gemini.js
 var GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta";
-var PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:AI|LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
+var PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:AI|OK|LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
 var PRODUCT_ALIASES = /* @__PURE__ */ new Map([
   ["AI", ["AI", "\u30A8\u30FC\u30A2\u30A4"]],
+  ["OK", ["OK", "\u30AA\u30FC\u30B1\u30FC", "\u30AA\u30FC\u30B1\u30A4"]],
   ["LINE", ["LINE", "\u30E9\u30A4\u30F3"]],
   ["Zoom", ["Zoom", "\u30BA\u30FC\u30E0"]],
   ["Google", ["Google", "\u30B0\u30FC\u30B0\u30EB"]],
@@ -166,7 +167,7 @@ async function onRequestPost(context) {
 }
 __name(onRequestPost, "onRequestPost");
 
-// ../.wrangler/tmp/pages-EulYwF/functionsRoutes-0.4380381680895278.mjs
+// ../.wrangler/tmp/pages-NB73sJ/functionsRoutes-0.6462422294011152.mjs
 var routes = [
   {
     routePath: "/api/translate",

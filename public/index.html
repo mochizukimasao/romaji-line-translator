@@ -11,50 +11,63 @@
     <main class="app-shell">
       <header class="topbar">
         <div class="brand">
-          <div class="brand-mark">文</div>
-          <div>
-            <div class="eyebrow">Romaji Line Translator</div>
-            <h1>Romaji Line Translator</h1>
-            <p class="description">ローマ字変換と日本語整形を、句読点や改行で区切りながらそのまま変換します。</p>
-          </div>
+          <div class="brand-mark" aria-hidden="true">文</div>
+          <h1>Romaji Line</h1>
         </div>
         <div class="topbar-tools">
-          <div class="status-pill" id="globalStatus">待機中</div>
+          <div class="status-pill status-pending" id="globalStatus" data-tooltip="状態: 待機中" aria-label="状態: 待機中">待機中</div>
+          <div class="toolbar" aria-label="表示と変換の設定">
+            <div class="toolbar-group" role="tablist" aria-label="変換モード">
+              <button id="modeRomaji" class="tool-button active" type="button" data-mode="romaji" role="tab" aria-selected="true" aria-label="ローマ字変換モード" data-tooltip="ローマ字変換モード">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 6.5h14M5 12h9M5 17.5h14"/><path d="M17 9.5v7m-2.5-2.5L17 17l2.5-3"/></svg>
+              </button>
+              <button id="modeJapanese" class="tool-button" type="button" data-mode="japanese" role="tab" aria-selected="false" aria-label="日本語整形モード" data-tooltip="日本語整形モード">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 5.5h14M5 12h14M5 18.5h9"/><path d="m17 15 2 2 3-4"/></svg>
+              </button>
+            </div>
+            <div class="toolbar-group" role="group" aria-label="表示高さ">
+              <button id="heightAuto" class="tool-button height-button active" type="button" data-height="auto" aria-pressed="true" aria-label="自動伸長表示" data-tooltip="自動伸長表示">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M7 4v16M4 7l3-3 3 3M17 20V4m-3 3 3-3 3 3"/></svg>
+              </button>
+              <button id="heightFixed" class="tool-button height-button" type="button" data-height="fixed" aria-pressed="false" aria-label="固定表示" data-tooltip="固定表示">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
+              </button>
+            </div>
+            <details class="help-popover">
+              <summary class="tool-button" aria-label="安定して使うコツ" data-tooltip="安定して使うコツ">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9a2.5 2.5 0 1 1 4.2 1.8c-1.2 1-1.9 1.4-1.9 2.8M12 16.8h.01"/></svg>
+              </summary>
+              <div class="usage-guide-content">
+                <p>安定して使うコツ</p>
+                <ul>
+                  <li>ローマ字は1文〜数文ごとに改行する。</li>
+                  <li>変換が落ち着いてから次の入力を続ける。</li>
+                  <li>一度に5〜10行程度を目安に区切る。</li>
+                  <li>急いで書いた日本語は整形モードを使う。</li>
+                  <li>長文は分割して変換し、完了後にコピーする。</li>
+                </ul>
+              </div>
+            </details>
+          </div>
         </div>
       </header>
-
-      <section class="page-actions" aria-label="補助操作">
-        <div class="page-actions-group">
-          <button id="copyResult" class="icon-button" type="button">コピー</button>
-          <button id="clearAll" class="icon-button" type="button">クリア</button>
-        </div>
-      </section>
-
-      <section class="mode-switch" aria-label="変換設定">
-        <div class="setting-block">
-          <div class="mode-switch-label">変換モード</div>
-          <div class="mode-switch-group" role="tablist" aria-label="変換モード">
-            <button id="modeRomaji" class="mode-button active" type="button" data-mode="romaji" role="tab" aria-selected="true">ローマ字変換</button>
-            <button id="modeJapanese" class="mode-button" type="button" data-mode="japanese" role="tab" aria-selected="false">日本語整形</button>
-          </div>
-        </div>
-        <div class="setting-block">
-          <div class="mode-switch-label">表示高さ</div>
-          <div class="mode-switch-group" role="group" aria-label="表示高さ">
-            <button id="heightAuto" class="mode-button height-button active" type="button" data-height="auto" aria-pressed="true">自動伸長</button>
-            <button id="heightFixed" class="mode-button height-button" type="button" data-height="fixed" aria-pressed="false">固定</button>
-          </div>
-        </div>
-      </section>
 
       <section class="workspace" aria-label="日本語変換ワークスペース">
         <div class="panel input-panel">
           <div class="panel-header">
-            <label for="sourceText">入力</label>
+            <div class="panel-title"><span class="panel-dot" aria-hidden="true"></span><label for="sourceText">入力</label></div>
             <div class="meta-row">
               <span id="lineCount">0 区切り</span>
               <span class="divider">•</span>
               <span id="modeHint">句読点・改行で確定</span>
+            </div>
+            <div class="panel-actions">
+              <button id="clearAll" class="icon-button" type="button" aria-label="入力をクリア" data-tooltip="入力をクリア">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 7h14M10 4h4l1 3M8 7l.8 12h6.4L16 7M10 10v6M14 10v6"/></svg>
+              </button>
+              <button id="convertAll" class="icon-button primary-button" type="button" aria-label="全体を変換" data-tooltip="全体を変換">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12h12M13 7l5 5-5 5"/><path d="m18.5 4 .4 1.1L20 5.5l-1.1.4-.4 1.1-.4-1.1-1.1-.4 1.1-.4.4-1.1Z"/></svg>
+              </button>
             </div>
           </div>
           <textarea
@@ -64,18 +77,17 @@
           ></textarea>
         </div>
 
-        <section class="controls" aria-label="操作">
-          <button id="convertAll" class="primary-button" type="button">全体を変換</button>
-        </section>
-
         <div class="panel output-panel">
           <div class="panel-header">
-            <span>変換結果</span>
+            <div class="panel-title"><span class="panel-dot result-dot" aria-hidden="true"></span><span>変換結果</span></div>
             <div class="meta-row">
               <span id="convertedCount">0 / 0</span>
               <span class="divider">•</span>
               <span id="totalChars">0 文字</span>
             </div>
+            <button id="copyResult" class="icon-button" type="button" aria-label="変換結果をコピー" data-tooltip="変換結果をコピー">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            </button>
           </div>
           <div id="results" class="results empty">句読点や改行で確定した区切りから漢字かな変換・日本語整形の結果が表示されます。</div>
         </div>
@@ -83,19 +95,6 @@
 
       <p id="message" class="message" role="status" aria-live="polite"></p>
 
-      <details class="usage-guide">
-        <summary>安定して使うコツ</summary>
-        <div class="usage-guide-content">
-          <p>おすすめの使い方</p>
-          <ul>
-            <li>ローマ字は1文〜数文ごとに改行し、句読点も普通に使う。</li>
-            <li>変換中は連続入力を控え、結果が落ち着いてから次の入力を続ける。</li>
-            <li>一度に5〜10行程度を目安に区切る。</li>
-            <li>急いで書いた日本語は「日本語整形」モードを使う。</li>
-            <li>長文は分割して変換し、完了を確認してからコピーする。</li>
-          </ul>
-        </div>
-      </details>
     </main>
 
     <script src="/app.js" type="module"></script>

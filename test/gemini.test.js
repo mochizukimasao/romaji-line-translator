@@ -39,6 +39,15 @@ test('romaji validation accepts the defined katakana alias for AI', () => {
   assert.equal(validateOutput('romaji', 'AI wa benri desu.', 'エーアイは便利です。'), true);
 });
 
+test('romaji validation preserves the OK abbreviation', () => {
+  assert.equal(validateOutput('romaji', 'OK desu.', 'OKです。'), true);
+});
+
+test('romaji validation accepts the defined katakana aliases for OK', () => {
+  assert.equal(validateOutput('romaji', 'OK desu.', 'オーケーです。'), true);
+  assert.equal(validateOutput('romaji', 'OK desu.', 'オーケイです。'), true);
+});
+
 test('romaji validation preserves existing Japanese runs', () => {
   assert.equal(validateOutput('romaji', '今日は ashita ikimasu.', '今日は明日行きます。'), true);
 });
