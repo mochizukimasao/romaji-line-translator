@@ -147,6 +147,7 @@ body::before {
     height: 444px;
     min-height: 0;
     overflow-y: auto;
+    scroll-behavior: auto;
   }
 }
 

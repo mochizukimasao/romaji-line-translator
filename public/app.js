@@ -77,6 +77,7 @@ function resizeSourceText() {
 }
 
 function setDisplayHeight(nextHeight, announce = false) {
+  const wasFixed = displayHeight === 'fixed';
   displayHeight = nextHeight === 'fixed' ? 'fixed' : 'auto';
   document.body.classList.toggle('fixed-height', displayHeight === 'fixed');
   heightButtons.forEach((button) => {
@@ -90,12 +91,22 @@ function setDisplayHeight(nextHeight, announce = false) {
     // 表示設定を保存できない環境でも、現在の選択は反映する。
   }
   resizeSourceText();
+  if (!wasFixed && displayHeight === 'fixed' && window.innerWidth > 720) {
+    results.scrollTop = results.scrollHeight;
+  }
   if (announce) setMessage(`${displayHeight === 'fixed' ? '固定' : '自動伸長'}表示に切り替えました。`);
+}
+
+function shouldFollowResults() {
+  if (!document.body.classList.contains('fixed-height') || window.innerWidth <= 720) return false;
+  const distanceFromBottom = results.scrollHeight - results.scrollTop - results.clientHeight;
+  return distanceFromBottom <= 32;
 }
 
 function render() {
   const items = documentModel.flatMap((line) => line.segments);
   const done = items.filter((item) => getItem(item).status === 'done').length;
+  const followResults = shouldFollowResults();
   const visibleLineCount = sourceText.value ? documentModel.length - (sourceText.value.endsWith('\n') ? 1 : 0) : 0;
   lineCount.textContent = `${visibleLineCount} 行`;
   convertedCount.textContent = `${done} / ${items.length}`;
@@ -141,6 +152,7 @@ function render() {
     return row;
   }));
   resizeSourceText();
+  if (followResults) results.scrollTop = results.scrollHeight;
 }
 
 async function requestTranslation(items, mode) {
