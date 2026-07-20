@@ -1,11 +1,3 @@
-------formdata-undici-029649819066
-Content-Disposition: form-data; name="metadata"
-
-{"main_module":"functionsWorker-0.05443164445239668.js"}
-------formdata-undici-029649819066
-Content-Disposition: form-data; name="functionsWorker-0.05443164445239668.js"; filename="functionsWorker-0.05443164445239668.js"
-Content-Type: application/javascript+module
-
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -174,7 +166,7 @@ async function onRequestPost(context) {
 }
 __name(onRequestPost, "onRequestPost");
 
-// ../.wrangler/tmp/pages-eR5CoY/functionsRoutes-0.25313618572860097.mjs
+// ../.wrangler/tmp/pages-EulYwF/functionsRoutes-0.4380381680895278.mjs
 var routes = [
   {
     routePath: "/api/translate",
@@ -633,5 +625,3 @@ var cloneResponse = /* @__PURE__ */ __name((response) => (
 export {
   pages_template_worker_default as default
 };
-
-------formdata-undici-029649819066--
