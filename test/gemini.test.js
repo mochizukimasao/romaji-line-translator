@@ -31,6 +31,14 @@ test('romaji validation accepts a defined katakana product alias', () => {
   assert.equal(validateOutput('romaji', 'LINE de okutte kudasai', 'ラインで送ってください'), true);
 });
 
+test('romaji validation preserves the AI abbreviation', () => {
+  assert.equal(validateOutput('romaji', 'AI wa benri desu.', 'AIは便利です。'), true);
+});
+
+test('romaji validation accepts the defined katakana alias for AI', () => {
+  assert.equal(validateOutput('romaji', 'AI wa benri desu.', 'エーアイは便利です。'), true);
+});
+
 test('romaji validation preserves existing Japanese runs', () => {
   assert.equal(validateOutput('romaji', '今日は ashita ikimasu.', '今日は明日行きます。'), true);
 });

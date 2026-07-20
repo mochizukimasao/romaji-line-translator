@@ -1,7 +1,8 @@
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-const PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
+const PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:AI|LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
 const PRODUCT_ALIASES = new Map([
+  ['AI', ['AI', 'エーアイ']],
   ['LINE', ['LINE', 'ライン']],
   ['Zoom', ['Zoom', 'ズーム']],
   ['Google', ['Google', 'グーグル']],
