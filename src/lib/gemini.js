@@ -1,182 +1,105 @@
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-function buildRomajiPrompt(lines) {
+const PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
+const PRODUCT_ALIASES = new Map([
+  ['LINE', ['LINE', 'ライン']],
+  ['Zoom', ['Zoom', 'ズーム']],
+  ['Google', ['Google', 'グーグル']],
+  ['ChatGPT', ['ChatGPT', 'チャットジーピーティー']]
+]);
+const JAPANESE_RUN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]+/gu;
+
+export function buildTranslatePrompt(mode, items) {
+  const goal = mode === 'japanese'
+    ? '日本語の意味、発言内容、固有名詞、数字、語調を保ったまま、助詞・句読点・明白な語順の崩れだけを最小限修正する。'
+    : 'ローマ字を文脈に応じた自然な漢字かな交じり文へ変換し、意味、語順、語調、丁寧さ、断定の強さを変えない。';
   return [
-    'You are a Japanese romaji-to-kana normalization editor.',
-    'Goal: convert romaji into natural, readable Japanese while preserving meaning and order.',
-    'Do not summarize, paraphrase, explain, or add commentary.',
-    'Keep existing meaning, tone, and wording as much as possible.',
-    'Convert romaji into natural Japanese kanji/kana based on context.',
-    'Normalize punctuation for Japanese text.',
-    'Convert ASCII punctuation such as comma and period into Japanese punctuation when appropriate, especially to "、" and "。".',
-    'Treat punctuation and line breaks as boundaries between input segments, but finish each segment naturally and completely.',
-    'Preserve existing Japanese characters, symbols, numbers, and line order unless a minimal correction is needed.',
-    'If a segment contains multiple clauses or sentences, keep them in the same segment and finish the entire segment.',
-    'Do not stop early. Return a translation for every input segment in the same order.',
-    'Return only a JSON array of translated strings.',
+    'あなたは正確な日本語変換エディタです。',
+    `目的: ${goal}`,
+    '要約、説明、情報追加、評価、装飾的な言い換えをしない。入力の順序と項目数を必ず保つ。',
+    'URL、メールアドレス、@mention、#hashtag、数字、日時、元入力の日本語、LINE・Zoom・Google・ChatGPTなどの製品名・略語、人名・地名・組織名は勝手に別語へ置換しない。',
+    '出力にLatin文字を残す場合は、元入力にある保護対象トークンと完全一致するものだけ許可する。',
+    mode === 'romaji' ? '安全に断定できない固有名詞は原表記またはカタカナを優先し、ASCII句読点は必要に応じて日本語句読点へ正規化する。' : 'だ・である調とです・ます調を相互変換しない。内容を削除・統合しない。',
+    'JSONオブジェクト {"results":[{"id":"入力id","output":"変換結果"}]} だけを返す。全項目を同じ順序で返す。',
     '',
-    'Input segments:',
-    JSON.stringify(lines)
+    JSON.stringify({ mode, items: items.map(({ id, text }) => ({ id, text })) })
   ].join('\n');
 }
 
-function buildJapanesePrompt(lines) {
-  return [
-    'You are a precise Japanese proofreading specialist for interview notes and rough memos.',
-    'Goal: keep the original meaning, energy, and style as much as possible while making the text easier to read.',
-    'Do not summarize, paraphrase, explain, or add commentary.',
-    'Preserve the original sentence-ending style exactly: keep だ・である if the source uses it, and keep です・ます if the source uses it.',
-    'Do not change the style into a different register.',
-    'Keep nuance words such as みたい, かな, and と思う unless they are clearly broken.',
-    'Repair only the minimum needed to fix subject-predicate agreement, awkward word order, missing particles, broken connections, and punctuation.',
-    'Do not add new information, guesses, explanations, or decorative phrasing.',
-    'Keep numbers, names, symbols, and line order unless a minimal correction is needed.',
-    'Do not delete or merge content unless it is required for minimal grammatical repair.',
-    'Return a normalization for every input line in the same order.',
-    'Return only a JSON array of translated strings.',
-    '',
-    'Input lines:',
-    JSON.stringify(lines)
-  ].join('\n');
-}
+function safeString(value) { return String(value ?? ''); }
 
-function buildTranslatePrompt(mode, lines) {
-  return mode === 'japanese' ? buildJapanesePrompt(lines) : buildRomajiPrompt(lines);
-}
-
-function parseResponse(text) {
+export function parseResponse(text) {
   const parsed = JSON.parse(text);
-  if (Array.isArray(parsed)) return parsed;
-  if (Array.isArray(parsed.translations)) return parsed.translations;
-  if (Array.isArray(parsed.items)) return parsed.items;
-  return [];
+  const results = Array.isArray(parsed) ? parsed : parsed?.results;
+  if (!Array.isArray(results)) throw new Error('invalid_json');
+  return results.map((item) => typeof item === 'string' ? { output: item } : item);
 }
 
-function safeString(value) {
-  return String(value ?? '');
-}
-
-function validateRomajiConversion(output) {
-  const outputText = safeString(output);
-  if (!outputText) return false;
-  if (/[A-Za-z]/.test(outputText)) return false;
-  if (!/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}0-9。、！？「」『』（）［］【】・…—ー]/u.test(outputText)) {
-    return false;
-  }
-  return outputText.trim().length > 0;
-}
-
-function validateJapaneseConversion(output) {
-  const outputText = safeString(output);
-  return outputText.trim().length > 0;
-}
-
-function splitLines(lines, maxLines = 8, maxChars = 1800) {
-  const chunks = [];
-  let chunk = [];
-  let charCount = 0;
-
-  for (const line of lines) {
-    const text = safeString(line);
-    const lineChars = text.length;
-    if (chunk.length && (chunk.length >= maxLines || charCount + lineChars > maxChars)) {
-      chunks.push(chunk);
-      chunk = [];
-      charCount = 0;
+export function validateOutput(mode, source, output) {
+  const value = safeString(output).trimEnd();
+  if (!value.trim()) return false;
+  if (mode === 'japanese' && value.replace(/\s/g, '').length < source.replace(/\s/g, '').length * 0.35) return false;
+  if (mode === 'romaji') {
+    let remainingJapanese = value;
+    for (const run of source.match(JAPANESE_RUN) || []) {
+      if (!remainingJapanese.includes(run)) return false;
+      remainingJapanese = remainingJapanese.replace(run, '');
     }
-
-    chunk.push(text);
-    charCount += lineChars;
   }
-
-  if (chunk.length) {
-    chunks.push(chunk);
+  const protectedTokens = source.match(PROTECTED_TOKEN) || [];
+  let remaining = value;
+  for (const token of protectedTokens) {
+    const alternatives = PRODUCT_ALIASES.get(token) || [token];
+    const matched = alternatives.find((candidate) => remaining.includes(candidate));
+    if (!matched) return false;
+    remaining = remaining.replace(matched, '');
   }
-
-  return chunks;
+  if (mode === 'romaji' && /[A-Za-z]/.test(value)) {
+    if (/[A-Za-z]/.test(remaining)) return false;
+  }
+  return mode === 'japanese' ||
+    /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(value) ||
+    protectedTokens.length > 0;
 }
 
-async function requestTranslation(lines, { apiKey, model, mode = 'romaji', attempt = 0 } = {}) {
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY が設定されていません。');
-  }
-
-  const guard = attempt
-    ? [
-        'Previous output violated the hard requirement.',
-        'Do not rewrite Japanese that is already present.',
-        'Only convert romaji to kana, nothing else.'
-      ].join(' ')
-    : '';
-
-  const response = await fetch(
-    `${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `${guard}\n${buildTranslatePrompt(mode, lines)}`.trim() }]
-          }
-        ],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: 4096,
-          responseMimeType: 'application/json'
-        }
-      })
-    }
-  );
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const message = data?.error?.message || 'Gemini API request failed';
-    throw new Error(message);
-  }
-
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-  const translations = parseResponse(text);
-
-  if (translations.length !== lines.length) {
-    throw new Error('変換結果の行数が一致しませんでした。');
-  }
-
-  const normalized = translations.map((line) => safeString(line).trimEnd());
-  const isValid = mode === 'japanese'
-    ? normalized.every((line) => validateJapaneseConversion(line))
-    : normalized.every((line) => validateRomajiConversion(line));
-
-  if (!isValid) {
-    throw new Error(mode === 'japanese'
-      ? '日本語整形の結果が不正でした。'
-      : 'ローマ字変換の結果が不正でした。');
-  }
-
-  return normalized;
+async function requestBatch(items, { apiKey, model, mode }) {
+  if (!apiKey) throw new Error('configuration');
+  const response = await fetch(`${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: buildTranslatePrompt(mode, items) }] }], generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json' } })
+  });
+  if (!response.ok) throw new Error('service');
+  const data = await response.json().catch(() => { throw new Error('invalid_json'); });
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('invalid_json');
+  const results = parseResponse(text);
+  if (results.length !== items.length) throw new Error('count_mismatch');
+  const byId = new Map(results.map((result) => [result.id, result]));
+  return items.map((item) => {
+    const result = byId.get(item.id);
+    if (!result || !validateOutput(mode, item.text, result.output)) throw new Error('validation');
+    return { id: item.id, status: 'ok', output: safeString(result.output).trimEnd(), errorCode: null };
+  });
 }
 
-export async function translateRomajiLines(lines, { apiKey, model = 'gemini-2.5-flash' } = {}) {
-  return translateTextLines(lines, { apiKey, model, mode: 'romaji' });
-}
+function errorCode(error) { return ['configuration', 'service', 'invalid_json', 'count_mismatch', 'validation'].includes(error?.message) ? error.message : 'service'; }
 
-export async function translateTextLines(lines, { apiKey, model = 'gemini-2.5-flash', mode = 'romaji' } = {}) {
-  const normalizedLines = lines.map((line) => safeString(line));
-  const translated = [];
-
-  for (const chunk of splitLines(normalizedLines)) {
+export async function translateItems(items, { apiKey, model = 'gemini-3.5-flash', mode = 'romaji' } = {}) {
+  const results = [];
+  for (let index = 0; index < items.length; index += 12) {
+    const chunk = items.slice(index, index + 12);
     try {
-      const result = await requestTranslation(chunk, { apiKey, model, mode, attempt: 0 });
-      translated.push(...result);
-    } catch (error) {
-      const message = error?.message || 'unknown error';
-      console.warn('[romaji-line-translator] first translation attempt failed, retrying once:', message);
-      const retry = await requestTranslation(chunk, { apiKey, model, mode, attempt: 1 });
-      translated.push(...retry);
+      results.push(...await requestBatch(chunk, { apiKey, model, mode }));
+    } catch (batchError) {
+      for (const item of chunk) {
+        try {
+          results.push(...await requestBatch([item], { apiKey, model, mode }));
+        } catch (itemError) {
+          results.push({ id: item.id, status: 'error', output: '', errorCode: errorCode(itemError || batchError) });
+        }
+      }
     }
   }
-
-  return translated;
+  return results;
 }

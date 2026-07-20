@@ -1,32 +1,20 @@
-import { translateTextLines } from '../../src/lib/gemini.js';
+import { translateItems } from '../../src/lib/gemini.js';
+import { validateTranslateRequest } from '../../src/lib/api-request.js';
 
 export async function onRequestPost(context) {
+  const { request, env } = context;
+  const body = await request.json().catch(() => ({}));
+  const validation = validateTranslateRequest(body);
+  if (!validation.ok) return Response.json({ error: validation.error }, { status: validation.status });
+  if (!env.GEMINI_API_KEY) return Response.json({ error: '変換サービスの設定がありません。' }, { status: 500 });
   try {
-    const { request, env } = context;
-    const body = await request.json().catch(() => ({}));
-    const lines = Array.isArray(body?.lines) ? body.lines : [];
-    const mode = body?.mode === 'japanese' ? 'japanese' : 'romaji';
-
-    if (!lines.length || lines.length > 1000) {
-      return Response.json({ error: '1〜1000行の入力を送ってください。' }, { status: 400 });
-    }
-
-    const normalizedLines = lines.map((line) => String(line ?? '').slice(0, 4000));
-    const totalLength = normalizedLines.join('\n').length;
-    if (totalLength > 120000) {
-      return Response.json({ error: '入力が長すぎます。少し分けて変換してください。' }, { status: 400 });
-    }
-
-    const translations = await translateTextLines(normalizedLines, {
+    const results = await translateItems(validation.items, {
       apiKey: env.GEMINI_API_KEY,
-      model: env.GEMINI_MODEL || 'gemini-2.5-flash',
-      mode
+      model: env.GEMINI_MODEL || 'gemini-3.5-flash',
+      mode: validation.mode
     });
-
-    return Response.json({ translations });
-  } catch (error) {
-    console.error(error);
-    const detail = error?.message ? ` (${error.message})` : '';
-    return Response.json({ error: `Gemini での変換に失敗しました${detail}` }, { status: 500 });
+    return Response.json({ results });
+  } catch {
+    return Response.json({ error: '変換サービスを利用できません。' }, { status: 503 });
   }
 }

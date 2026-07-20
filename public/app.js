@@ -1,3 +1,15 @@
+import {
+  buildDocument,
+  canApplyResult,
+  composeCopyText,
+  getAllTranslatableItems,
+  getDocumentStatus,
+  getTranslatableItems,
+  getTranslationMessage,
+  isCurrentResponse,
+  reconcileDocument
+} from '/core.js';
+
 const sourceText = document.querySelector('#sourceText');
 const results = document.querySelector('#results');
 const lineCount = document.querySelector('#lineCount');
@@ -11,374 +23,181 @@ const clearButton = document.querySelector('#clearAll');
 const modeHint = document.querySelector('#modeHint');
 const modeButtons = Array.from(document.querySelectorAll('[data-mode]'));
 
-const translations = new Map();
-const inFlight = new Map();
-const failed = new Map();
-let requestSerial = 0;
-let currentMode = 'romaji';
-
-const sentenceBoundaries = new Set(['.', ',', '?', '!', '。', '、', '，', '？', '！']);
 const modeMeta = {
-  romaji: {
-    hint: '句読点・改行で確定',
-    placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?'
-  },
-  japanese: {
-    hint: '改行で確定',
-    placeholder: 'きょう は いい てんきだ でも すこし さむい'
-  }
+  romaji: { hint: '句読点・改行で確定', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
+  japanese: { hint: '改行で確定', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
 };
-
-const statusLabels = {
-  pending: '未確定',
-  loading: '変換中',
-  done: '完了',
-  error: '失敗'
-};
-
-function isWhitespace(char) {
-  return char === ' ' || char === '\t' || char === '\r';
-}
-
-function getSourceLines() {
-  if (!sourceText.value) return [];
-  return sourceText.value.split('\n');
-}
-
-function splitLineIntoSegments(text, mode, isLastLine) {
-  if (mode === 'japanese') {
-    return text.trim()
-      ? [{
-          index: 0,
-          text,
-          isConfirmed: !isLastLine
-        }]
-      : [];
-  }
-
-  const segments = [];
-  let cursor = 0;
-
-  while (cursor < text.length) {
-    let end = cursor;
-    let isConfirmed = false;
-
-    while (end < text.length) {
-      const char = text[end];
-      if (sentenceBoundaries.has(char)) {
-        isConfirmed = true;
-        end += 1;
-        while (end < text.length && sentenceBoundaries.has(text[end])) {
-          end += 1;
-        }
-        break;
-      }
-
-      end += 1;
-    }
-
-    const segmentText = text.slice(cursor, end);
-    if (segmentText.trim() || isConfirmed) {
-      segments.push({
-        index: segments.length,
-        text: segmentText,
-        isConfirmed
-      });
-    }
-
-    if (end >= text.length) break;
-
-    cursor = end;
-    while (cursor < text.length && isWhitespace(text[cursor])) {
-      cursor += 1;
-    }
-  }
-
-  if (!segments.length && text.trim()) {
-    segments.push({
-      index: 0,
-      text,
-      isConfirmed: false
-    });
-  }
-
-  return segments;
-}
-
-function getDisplayEntries() {
-  const lines = getSourceLines();
-  return lines
-    .map((text, index) => ({
-      index,
-      text,
-      segments: splitLineIntoSegments(text, currentMode, index === lines.length - 1)
-    }))
-    .filter((entry) => entry.text.trim());
-}
-
-function resizeSourceText() {
-  sourceText.style.height = 'auto';
-  sourceText.style.height = `${Math.max(sourceText.scrollHeight, 540)}px`;
-}
+const statusLabels = { draft: '未確定', pending: '待機中', loading: '変換中', done: '完了', error: '失敗' };
+let currentMode = 'romaji';
+let requestVersion = 0;
+let requestSerial = 0;
+let documentModel = buildDocument('', currentMode, requestVersion);
+let state = new Map();
 
 function setMessage(text = '', isError = false) {
   message.textContent = text;
   message.classList.toggle('error', isError);
 }
 
-function segmentKey(lineIndex, segmentIndex, text) {
-  return `${currentMode}:${lineIndex}:${segmentIndex}:${text}`;
+function getItem(item) {
+  return state.get(item.id) || item;
 }
 
-function splitTargets(targets, maxLines = 12, maxChars = 2800) {
-  const chunks = [];
-  let chunk = [];
-  let charCount = 0;
-
-  for (const item of targets) {
-    const itemChars = item.text.length;
-    if (chunk.length && (chunk.length >= maxLines || charCount + itemChars > maxChars)) {
-      chunks.push(chunk);
-      chunk = [];
-      charCount = 0;
-    }
-
-    chunk.push(item);
-    charCount += itemChars;
-  }
-
-  if (chunk.length) {
-    chunks.push(chunk);
-  }
-
-  return chunks;
+function rebuildDocument() {
+  requestVersion += 1;
+  const reconciled = reconcileDocument(
+    documentModel,
+    state,
+    sourceText.value,
+    currentMode,
+    requestVersion
+  );
+  documentModel = reconciled.document;
+  state = reconciled.state;
 }
 
-function getTotalChars(displayLines) {
-  return displayLines.reduce((sum, line, index) => {
-    return (
-      sum +
-      line.segments.reduce((lineSum, segment) => {
-        const key = segmentKey(line.index, segment.index, segment.text);
-        return lineSum + (translations.get(key)?.length || 0);
-      }, 0)
-    );
-  }, 0);
-}
-
-function getLineStatus(line) {
-  const keys = line.segments.map((segment) => segmentKey(line.index, segment.index, segment.text));
-  if (keys.some((key) => inFlight.has(key))) return 'loading';
-  if (keys.some((key) => failed.has(key))) return 'error';
-  if (keys.length && keys.every((key) => translations.has(key))) return 'done';
-  return 'pending';
-}
-
-function getLineText(line) {
-  return line.segments
-    .map((segment) => {
-      const key = segmentKey(line.index, segment.index, segment.text);
-      if (translations.has(key)) return translations.get(key) || '';
-      return '...';
-    })
-    .join('');
+function resizeSourceText() {
+  sourceText.style.height = 'auto';
+  sourceText.style.height = `${Math.max(sourceText.scrollHeight, 180)}px`;
 }
 
 function render() {
-  const displayEntries = getDisplayEntries();
-  const doneCount = displayEntries.filter((entry) => getLineStatus(entry) === 'done').length;
-  const totalCharCount = getTotalChars(displayEntries);
-
-  lineCount.textContent = `${displayEntries.length} 行`;
-  convertedCount.textContent = `${doneCount} / ${displayEntries.length}`;
-  totalChars.textContent = `${totalCharCount} 文字`;
-  globalStatus.textContent = inFlight.size ? '変換中' : '待機中';
+  const items = documentModel.flatMap((line) => line.segments);
+  const done = items.filter((item) => getItem(item).status === 'done').length;
+  const visibleLineCount = sourceText.value ? documentModel.length - (sourceText.value.endsWith('\n') ? 1 : 0) : 0;
+  lineCount.textContent = `${visibleLineCount} 行`;
+  convertedCount.textContent = `${done} / ${items.length}`;
+  totalChars.textContent = `${items.reduce((sum, item) => sum + (getItem(item).output || '').length, 0)} 文字`;
+  const status = getDocumentStatus(documentModel, getItem);
+  globalStatus.textContent = { loading: '変換中', error: '一部失敗', draft: '未確定', done: '完了' }[status] || '待機中';
   modeHint.textContent = modeMeta[currentMode].hint;
-  convertAllButton.disabled = inFlight.size > 0;
+  convertAllButton.disabled = status === 'loading';
 
-  if (!displayEntries.length) {
+  if (!documentModel.some((line) => line.segments.length)) {
     results.className = 'results empty';
-    results.textContent = currentMode === 'japanese'
-      ? '改行で確定した行から日本語整形結果が表示されます。'
-      : '改行で確定した行だけが表示されます。句読点は行内の区切りとして扱います。';
+    results.textContent = currentMode === 'japanese' ? '改行で確定した行から日本語整形結果が表示されます。' : '改行または句読点で確定した区切りから変換結果が表示されます。';
     return;
   }
 
   results.className = 'results';
-  results.replaceChildren(
-    ...displayEntries.map((entry) => {
-      const row = document.createElement('div');
-      row.className = 'result-row';
-
-      const number = document.createElement('div');
-      number.className = 'line-number';
-      number.textContent = String(entry.index + 1).padStart(2, '0');
-
-      const text = document.createElement('div');
-      text.className = 'translated-text';
-      text.textContent = getLineText(entry) || '...';
-
-      const status = document.createElement('div');
-      const statusValue = getLineStatus(entry);
-      status.className = `row-status ${statusValue}`;
-      status.textContent = statusLabels[statusValue];
-
-      row.append(number, text, status);
-      return row;
-    })
-  );
-
+  results.replaceChildren(...documentModel.map((line) => {
+    const row = document.createElement('div');
+    row.className = `result-row${line.segments.length ? '' : ' blank-row'}`;
+    const number = document.createElement('div');
+    number.className = 'line-number';
+    number.textContent = String(line.lineIndex + 1).padStart(2, '0');
+    const text = document.createElement('div');
+    text.className = 'translated-text';
+    text.textContent = line.segments.length ? line.segments.map((item) => getItem(item).output || '…').join('') : '';
+    const status = document.createElement('div');
+    const lineStatus = line.segments.length ? line.segments.map((item) => getItem(item).status) : ['done'];
+    const statusValue = lineStatus.includes('error') ? 'error' : lineStatus.includes('loading') ? 'loading' : lineStatus.includes('draft') ? 'draft' : lineStatus.includes('pending') ? 'pending' : 'done';
+    status.className = `row-status ${statusValue}`;
+    status.textContent = line.segments.length ? statusLabels[statusValue] : '空行';
+    row.append(number, text, status);
+    for (const item of line.segments) {
+      if (getItem(item).status === 'error') {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'retry-button';
+        retry.textContent = '再試行';
+        retry.addEventListener('click', () => void translateTargets([item]));
+        row.append(retry);
+        break;
+      }
+    }
+    return row;
+  }));
   resizeSourceText();
 }
 
-async function requestTranslation(lines, { mode = currentMode } = {}) {
+async function requestTranslation(items, mode) {
   const response = await fetch('/api/translate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lines, mode })
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, items: items.map((item) => ({ id: item.id, text: item.source })) })
   });
-
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || '変換に失敗しました。');
-  }
-  return data.translations;
+  if (!response.ok) throw new Error(data.error || '変換サービスを利用できません。');
+  if (!Array.isArray(data.results)) throw new Error('変換結果を読み取れませんでした。');
+  return data.results;
 }
 
 async function translateTargets(targets, successMessage = '') {
-  if (!targets.length) return;
-
+  const currentTargets = targets.map((item) => getItem(item));
+  const unique = currentTargets.filter((item, index, list) => list.findIndex((other) => other.id === item.id) === index);
+  if (!unique.length) return;
   const serial = ++requestSerial;
-  const mode = currentMode;
-  targets.forEach((item) => {
-    failed.delete(item.key);
-    inFlight.set(item.key, serial);
-  });
+  const mode = unique[0].mode;
+  unique.forEach((item) => state.set(item.id, { ...item, status: 'loading', output: '', token: serial }));
   setMessage('');
   render();
-
   try {
-    for (const chunk of splitTargets(targets)) {
-      const translatedLines = await requestTranslation(chunk.map((item) => item.text), { mode });
-      translatedLines.forEach((translated, index) => {
-        const item = chunk[index];
-        if (inFlight.get(item.key) === serial) {
-          translations.set(item.key, translated || '');
-          failed.delete(item.key);
-        }
-      });
+    const responseResults = await requestTranslation(unique, mode);
+    const byId = new Map(responseResults.map((result) => [result.id, result]));
+    for (const item of unique) {
+      const result = byId.get(item.id);
+      const current = state.get(item.id);
+      if (!isCurrentResponse(item, result, current, serial)) continue;
+      if (result.status === 'error') {
+        state.set(item.id, { ...item, status: 'error', output: '', errorCode: result.errorCode || 'service', token: serial });
+      } else if (canApplyResult(item, result, current, serial)) {
+        state.set(item.id, { ...item, status: 'done', output: result.output, errorCode: null, token: serial });
+      }
     }
-    if (successMessage) setMessage(successMessage);
+    for (const item of unique) {
+      const current = state.get(item.id);
+      if (
+        current?.token === serial &&
+        current.requestVersion === item.requestVersion &&
+        current.status === 'loading'
+      ) {
+        state.set(item.id, { ...item, status: 'error', output: '', errorCode: 'missing_result', token: serial });
+      }
+    }
+    const outcome = getTranslationMessage(documentModel, getItem, successMessage);
+    setMessage(outcome.text, outcome.isError);
   } catch (error) {
-    targets.forEach((item) => {
-      if (inFlight.get(item.key) === serial && !translations.has(item.key)) {
-        failed.set(item.key, true);
+    let appliedError = false;
+    unique.forEach((item) => {
+      const current = state.get(item.id);
+      if (current?.token === serial && current.requestVersion === item.requestVersion) {
+        state.set(item.id, { ...item, status: 'error', output: '', errorCode: 'service', token: serial });
+        appliedError = true;
       }
     });
-    setMessage(error?.message || '変換に失敗しました。', true);
-  } finally {
-    targets.forEach((item) => {
-      if (inFlight.get(item.key) === serial) inFlight.delete(item.key);
-    });
-    render();
+    if (appliedError) setMessage(error?.message || '変換サービスを利用できません。', true);
   }
+  render();
 }
 
-function translateConfirmedLines() {
-  const entries = getDisplayEntries();
-  const targets = [];
-
-  for (const entry of entries) {
-    for (const segment of entry.segments) {
-      if (!segment.isConfirmed || !segment.text.trim()) continue;
-
-      const key = segmentKey(entry.index, segment.index, segment.text);
-      if (translations.has(key) || inFlight.has(key)) continue;
-
-      targets.push({ text: segment.text, index: entry.index, key });
-    }
-  }
-
-  void translateTargets(targets);
+function translateConfirmed() {
+  void translateTargets(getTranslatableItems(documentModel, getItem));
 }
 
-async function translateAllLines() {
-  const targets = getDisplayEntries()
-    .flatMap((entry) =>
-      entry.segments.map((segment) => ({
-        text: segment.text,
-        index: entry.index,
-        key: segmentKey(entry.index, segment.index, segment.text)
-      }))
-    )
-    .filter((item) => item.text.trim());
-
+function translateAll() {
+  const targets = getAllTranslatableItems(documentModel, getItem);
   if (!targets.length) {
-    setMessage('変換する行がありません。', true);
-    return;
+    const status = getDocumentStatus(documentModel, getItem);
+    if (status === 'error') return setMessage('失敗項目の「再試行」を押してください。', true);
+    return setMessage(status === 'done' ? 'すべて変換済みです。' : '変換する入力がありません。', status !== 'done');
   }
-
-  const serial = ++requestSerial;
-  const mode = currentMode;
-  targets.forEach((item) => {
-    failed.delete(item.key);
-    inFlight.set(item.key, serial);
-  });
-  setMessage('');
-  render();
-
-  try {
-    for (const chunk of splitTargets(targets)) {
-      const translatedLines = await requestTranslation(chunk.map((item) => item.text), { mode });
-      translatedLines.forEach((translated, index) => {
-        const item = chunk[index];
-        if (inFlight.get(item.key) === serial) {
-          translations.set(item.key, translated || '');
-          failed.delete(item.key);
-        }
-      });
-    }
-    setMessage('全体を変換しました。');
-  } catch (error) {
-    targets.forEach((item) => {
-      if (inFlight.get(item.key) === serial && !translations.has(item.key)) {
-        failed.set(item.key, true);
-      }
-    });
-    setMessage(error?.message || '変換に失敗しました。', true);
-  } finally {
-    targets.forEach((item) => {
-      if (inFlight.get(item.key) === serial) inFlight.delete(item.key);
-    });
-    render();
-  }
+  void translateTargets(targets, '全体を変換しました。');
 }
 
 async function copyResult() {
-  const output = getDisplayEntries()
-    .map((entry) =>
-      entry.segments
-        .map((segment) => translations.get(segmentKey(entry.index, segment.index, segment.text)) || '')
-        .join('')
-    )
-    .join('\n')
-    .trimEnd();
-
-  if (!output.trim()) {
-    setMessage('コピーできる変換結果がありません。', true);
-    return;
+  const copy = composeCopyText(documentModel, getItem);
+  if (!copy.ready) return setMessage('未確定・処理中・失敗の項目があるためコピーできません。', true);
+  try {
+    await navigator.clipboard.writeText(copy.text);
+    setMessage('変換結果をコピーしました。');
+  } catch {
+    setMessage('コピー権限がありません。', true);
   }
-
-  await navigator.clipboard.writeText(output);
-  setMessage('変換結果をコピーしました。');
 }
 
 function clearAll() {
   sourceText.value = '';
-  translations.clear();
-  inFlight.clear();
-  failed.clear();
-  requestSerial += 1;
+  rebuildDocument();
   setMessage('入力をクリアしました。');
   resizeSourceText();
   render();
@@ -388,49 +207,26 @@ function clearAll() {
 function setMode(nextMode) {
   if (nextMode === currentMode) return;
   currentMode = nextMode;
-  translations.clear();
-  inFlight.clear();
-  failed.clear();
-  requestSerial += 1;
-
+  rebuildDocument();
   modeButtons.forEach((button) => {
-    const isActive = button.dataset.mode === currentMode;
-    button.classList.toggle('active', isActive);
-    button.setAttribute('aria-selected', String(isActive));
+    const active = button.dataset.mode === currentMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
   });
-
   sourceText.placeholder = modeMeta[currentMode].placeholder;
   setMessage(`${currentMode === 'japanese' ? '日本語整形' : 'ローマ字変換'}モードに切り替えました。`);
   render();
 }
 
-convertAllButton.addEventListener('click', () => {
-  void translateAllLines();
-});
-
-copyButton.addEventListener('click', () => {
-  void copyResult();
-});
-
-clearButton.addEventListener('click', () => {
-  clearAll();
-});
-
-modeButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji');
-  });
-});
-
+convertAllButton.addEventListener('click', translateAll);
+copyButton.addEventListener('click', () => void copyResult());
+clearButton.addEventListener('click', clearAll);
+modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji')));
 sourceText.addEventListener('input', () => {
+  rebuildDocument();
   setMessage('');
-  translateConfirmedLines();
-  resizeSourceText();
   render();
-});
-
-window.addEventListener('resize', () => {
-  resizeSourceText();
+  translateConfirmed();
 });
 
 resizeSourceText();

@@ -231,7 +231,7 @@ h1 {
 textarea {
   display: block;
   width: 100%;
-  min-height: 540px;
+  min-height: 180px;
   resize: none;
   overflow: hidden;
   border: 0;
@@ -336,7 +336,21 @@ textarea:focus-visible {
   display: flex;
   justify-content: center;
   gap: 10px;
+  align-items: center;
   margin-top: 16px;
+}
+
+.workspace > .controls {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.retry-button {
+  grid-column: 2 / -1;
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.82rem;
 }
 
 button {
@@ -400,9 +414,15 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  textarea,
-  .results {
-    min-height: 420px;
+  .workspace > .controls {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: stretch;
+    margin: 0;
+  }
+
+  .workspace > .controls button {
+    width: 100%;
   }
 }
 
@@ -454,7 +474,7 @@ button:disabled {
   }
 
   textarea {
-    min-height: 340px;
+    min-height: 180px;
     padding: 18px 14px 16px;
   }
 

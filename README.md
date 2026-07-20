@@ -1,6 +1,6 @@
 # Romaji Line Translator
 
-ローマ字をかなにだけ変換する小さな Web アプリです。意味の言い換え、口調の変更、意訳はしません。既存の漢字やかな、記号は保持します。
+ローマ字を自然な漢字かな交じり文へ変換し、日本語の粗いメモを最小限整形する小さな Web アプリです。意味の言い換え、口調の変更、要約、情報追加はしません。
 
 ## 構成
 
@@ -14,11 +14,17 @@
 │       └── translate.js
 ├── src
 │   └── lib
+│       ├── api-request.js
 │       └── gemini.js
-└── public
-    ├── index.html
-    ├── styles.css
-    └── app.js
+├── public
+│   ├── core.js
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
+└── test
+    ├── api-request.test.js
+    ├── core.test.js
+    └── gemini.test.js
 ```
 
 ## セットアップ
@@ -32,7 +38,7 @@ cp .env.example .env
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 PORT=3000
 ```
 
@@ -43,6 +49,34 @@ npm run dev
 ```
 
 ブラウザで `http://localhost:3000` を開きます。
+
+## API
+
+`POST /api/translate`は、ローマ字変換または日本語整形の項目を受け取ります。
+
+```json
+{
+  "mode": "romaji",
+  "items": [
+    { "id": "romaji:0:0:example", "text": "otukaresamadesu." }
+  ]
+}
+```
+
+```json
+{
+  "results": [
+    {
+      "id": "romaji:0:0:example",
+      "status": "ok",
+      "output": "お疲れ様です。",
+      "errorCode": null
+    }
+  ]
+}
+```
+
+結果は項目別に返り、失敗した項目は`status: "error"`になります。
 
 ## Cloudflare Pages
 
