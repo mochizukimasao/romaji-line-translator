@@ -25,8 +25,8 @@ const heightButtons = Array.from(document.querySelectorAll('[data-height]'));
 const DISPLAY_HEIGHT_STORAGE_KEY = 'romaji-line-translator.display-height';
 
 const modeMeta = {
-  romaji: { hint: '句読点・改行で確定', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
-  japanese: { hint: '改行で確定', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
+  romaji: { hint: '文の区切り: 句読点・改行', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
+  japanese: { hint: '文の区切り: 改行', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
 };
 const statusLabels = { draft: '未確定', pending: '待機中', loading: '変換中', done: '完了', error: '失敗' };
 let currentMode = 'romaji';
