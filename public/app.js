@@ -267,6 +267,17 @@ function setMode(nextMode) {
 }
 
 convertAllButton.addEventListener('click', translateAll);
+sourceText.addEventListener('keydown', (event) => {
+  if (
+    event.key === 'Enter' &&
+    (event.metaKey || event.ctrlKey) &&
+    !event.isComposing &&
+    event.keyCode !== 229
+  ) {
+    event.preventDefault();
+    translateAll();
+  }
+});
 copyButton.addEventListener('click', () => void copyResult());
 clearButton.addEventListener('click', clearAll);
 modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji')));
