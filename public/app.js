@@ -4,7 +4,6 @@ import {
   composeCopyText,
   getAllTranslatableItems,
   getDocumentStatus,
-  getTranslatableItems,
   getTranslationMessage,
   isCurrentResponse,
   reconcileDocument
@@ -122,7 +121,7 @@ function render() {
 
   if (!documentModel.some((line) => line.segments.length)) {
     results.className = 'results empty';
-    results.textContent = currentMode === 'japanese' ? '改行で確定した行から日本語整形結果が表示されます。' : '改行または句読点で確定した区切りから変換結果が表示されます。';
+    results.textContent = '入力後に「全体を変換」を押すか、⌘+Enter（Windows/LinuxはCtrl+Enter）を押してください。';
     return;
   }
 
@@ -218,10 +217,6 @@ async function translateTargets(targets, successMessage = '') {
   render();
 }
 
-function translateConfirmed() {
-  void translateTargets(getTranslatableItems(documentModel, getItem));
-}
-
 function translateAll() {
   const targets = getAllTranslatableItems(documentModel, getItem);
   if (!targets.length) {
@@ -286,7 +281,6 @@ sourceText.addEventListener('input', () => {
   rebuildDocument();
   setMessage('');
   render();
-  translateConfirmed();
 });
 
 window.addEventListener('resize', resizeSourceText);
