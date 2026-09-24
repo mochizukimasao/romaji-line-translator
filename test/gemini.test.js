@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranslatePrompt, translateItems, validateOutput } from '../src/lib/gemini.js';
+import { DEFAULT_GEMINI_MODEL, buildTranslatePrompt, translateItems, validateOutput } from '../src/lib/gemini.js';
 
 test('prompt policy is shared by normal and isolated requests', () => {
   const prompt = buildTranslatePrompt('romaji', [{ id: 'a', text: 'LINE de okutte kudasai' }]);
@@ -88,6 +88,49 @@ test('successful batch maps outputs by response ID when response order differs',
       { id: 'first', status: 'ok', output: '一つ', errorCode: null },
       { id: 'second', status: 'ok', output: '二つ', errorCode: null }
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('requests use the fixed JSON schema and the stable default model', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = '';
+  let requestBody;
+  globalThis.fetch = async (url, options) => {
+    requestUrl = url;
+    requestBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({ results: [{ id: 'one', output: '一つ' }] }) }] } }]
+    }), { status: 200 });
+  };
+
+  try {
+    const results = await translateItems([{ id: 'one', text: 'hitotsu' }], { apiKey: 'test-only' });
+    assert.equal(results[0].status, 'ok');
+    assert.match(requestUrl, new RegExp(`/models/${DEFAULT_GEMINI_MODEL}:generateContent`));
+    assert.deepEqual(requestBody.generationConfig.responseSchema.required, ['results']);
+    assert.deepEqual(requestBody.generationConfig.responseSchema.properties.results.items.required, ['id', 'output']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a transient service failure retries the same batch once before reporting an error', async () => {
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = async () => {
+    callCount += 1;
+    if (callCount === 1) return new Response('temporary outage', { status: 503 });
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({ results: [{ id: 'one', output: '一つ' }] }) }] } }]
+    }), { status: 200 });
+  };
+
+  try {
+    const results = await translateItems([{ id: 'one', text: 'hitotsu' }], { apiKey: 'test-only', mode: 'romaji' });
+    assert.equal(callCount, 2);
+    assert.equal(results[0].status, 'ok');
   } finally {
     globalThis.fetch = originalFetch;
   }

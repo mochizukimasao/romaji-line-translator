@@ -1,4 +1,3 @@
-export const SENTENCE_BOUNDARIES = new Set(['.', ',', '?', '!', '。', '、', '？', '！', '，']);
 const PROTECTED_SPAN_PATTERNS = [
   /https?:\/\/\S+/g,
   /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
@@ -6,10 +5,6 @@ const PROTECTED_SPAN_PATTERNS = [
   /\d+(?:[.,:/-]\d+)+/g
 ];
 const TRAILING_SENTENCE_PUNCTUATION = /[.,?!。、「」『』（）［］【】、，？！]+$/u;
-
-function isWhitespace(char) {
-  return char === ' ' || char === '\t' || char === '\r';
-}
 
 export function getProtectedSpans(source) {
   const text = String(source ?? '');
@@ -44,38 +39,7 @@ export function createItemId(mode, lineIndex, segmentIndex, source) {
 export function splitLineIntoSegments(text, mode, isLastLine = true) {
   const source = String(text ?? '');
   if (!source.trim()) return [];
-
-  if (mode === 'japanese') {
-    return [{ index: 0, text: source, confirmed: !isLastLine }];
-  }
-
-  const protectedSpans = getProtectedSpans(source);
-  const isProtected = (index) => protectedSpans.some((span) => index >= span.start && index < span.end);
-  const segments = [];
-  let cursor = 0;
-  while (cursor < source.length) {
-    let end = cursor;
-    let confirmed = false;
-    while (end < source.length) {
-      if (SENTENCE_BOUNDARIES.has(source[end]) && !isProtected(end)) {
-        confirmed = true;
-        end += 1;
-        while (end < source.length && SENTENCE_BOUNDARIES.has(source[end]) && !isProtected(end)) end += 1;
-        break;
-      }
-      end += 1;
-    }
-
-    const segmentText = source.slice(cursor, end);
-    if (segmentText.trim()) segments.push({ index: segments.length, text: segmentText, confirmed });
-    if (end >= source.length) break;
-    cursor = end;
-    while (cursor < source.length && isWhitespace(source[cursor])) cursor += 1;
-  }
-
-  const lastSegment = segments.at(-1);
-  if (lastSegment && !lastSegment.confirmed && !isLastLine) lastSegment.confirmed = true;
-  return segments;
+  return [{ index: 0, text: source, confirmed: true }];
 }
 
 export function buildDocument(text, mode = 'romaji', requestVersion = 1) {
@@ -154,7 +118,7 @@ export function getAllTranslatableItems(document, getItem = (item) => item) {
   return document
     .flatMap((line) => line.segments)
     .map((item) => getItem(item) || item)
-    .filter((item) => item.source.trim() && (item.status === 'draft' || item.status === 'pending'));
+    .filter((item) => item.source.trim() && (item.status === 'draft' || item.status === 'pending' || item.status === 'error'));
 }
 
 export function isCurrentResponse(sentItem, result, currentItem, token) {

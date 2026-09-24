@@ -1,8 +1,339 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
+// lib/google-auth.js
+var GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+var SESSION_COOKIE = "__Host-romaji_session";
+var SESSION_SECONDS = 12 * 60 * 60;
+var googleKeyCache = { keys: null, expiresAt: 0 };
+function decodeBase64Url(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+__name(decodeBase64Url, "decodeBase64Url");
+function encodeBase64Url(value) {
+  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value instanceof ArrayBuffer ? new Uint8Array(value) : value;
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+__name(encodeBase64Url, "encodeBase64Url");
+function decodeJsonPart(value) {
+  return JSON.parse(new TextDecoder().decode(decodeBase64Url(value)));
+}
+__name(decodeJsonPart, "decodeJsonPart");
+function getAllowedEmails(env) {
+  return String(env.GOOGLE_ALLOWED_EMAILS || "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
+}
+__name(getAllowedEmails, "getAllowedEmails");
+function getCookie(request, name) {
+  const cookies = request.headers.get("Cookie") || "";
+  for (const cookie of cookies.split(";")) {
+    const separator = cookie.indexOf("=");
+    if (separator < 0 || cookie.slice(0, separator).trim() !== name) continue;
+    return cookie.slice(separator + 1).trim();
+  }
+  return "";
+}
+__name(getCookie, "getCookie");
+async function getGoogleKeys(forceRefresh = false) {
+  if (!forceRefresh && googleKeyCache.keys && googleKeyCache.expiresAt > Date.now()) {
+    return googleKeyCache.keys;
+  }
+  const response = await fetch(GOOGLE_CERTS_URL, { cf: { cacheTtl: 300, cacheEverything: true } });
+  if (!response.ok) throw new Error("google_keys_unavailable");
+  const body = await response.json();
+  if (!Array.isArray(body.keys) || !body.keys.length) throw new Error("google_keys_invalid");
+  const cacheControl = response.headers.get("Cache-Control") || "";
+  const maxAge = Number(cacheControl.match(/max-age=(\d+)/i)?.[1] || 3600);
+  googleKeyCache.keys = body.keys;
+  googleKeyCache.expiresAt = Date.now() + Math.max(60, Math.min(maxAge, 21600)) * 1e3;
+  return body.keys;
+}
+__name(getGoogleKeys, "getGoogleKeys");
+async function verifyGoogleIdToken(token, clientId) {
+  if (typeof token !== "string" || token.length > 2e4) throw new Error("invalid_token");
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts.some((part) => !part)) throw new Error("invalid_token");
+  const [encodedHeader, encodedClaims, encodedSignature] = parts;
+  const header = decodeJsonPart(encodedHeader);
+  const claims = decodeJsonPart(encodedClaims);
+  if (header.alg !== "RS256" || typeof header.kid !== "string") throw new Error("invalid_algorithm");
+  let keys = await getGoogleKeys();
+  let jwk = keys.find((key) => key.kid === header.kid && key.kty === "RSA" && key.use === "sig");
+  if (!jwk) {
+    keys = await getGoogleKeys(true);
+    jwk = keys.find((key) => key.kid === header.kid && key.kty === "RSA" && key.use === "sig");
+  }
+  if (!jwk) throw new Error("unknown_signing_key");
+  const publicKey = await crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  const signedContent = new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`);
+  const validSignature = await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5",
+    publicKey,
+    decodeBase64Url(encodedSignature),
+    signedContent
+  );
+  if (!validSignature) throw new Error("invalid_signature");
+  const now = Math.floor(Date.now() / 1e3);
+  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  if (!["accounts.google.com", "https://accounts.google.com"].includes(claims.iss) || !audiences.includes(clientId) || claims.azp !== void 0 && claims.azp !== clientId || !Number.isFinite(claims.exp) || claims.exp <= now || !Number.isFinite(claims.iat) || claims.iat > now + 60 || typeof claims.sub !== "string" || !claims.sub.trim() || typeof claims.email !== "string" || !claims.email.trim() || !(claims.email_verified === true || claims.email_verified === "true")) throw new Error("invalid_claims");
+  return { email: claims.email.trim().toLowerCase(), sub: claims.sub.trim() };
+}
+__name(verifyGoogleIdToken, "verifyGoogleIdToken");
+async function importSessionKey(secret) {
+  if (typeof secret !== "string" || new TextEncoder().encode(secret).byteLength < 32) {
+    throw new Error("session_secret_invalid");
+  }
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"]
+  );
+}
+__name(importSessionKey, "importSessionKey");
+async function createSessionCookie(identity, env) {
+  const key = await importSessionKey(env.GOOGLE_SESSION_SECRET);
+  const now = Math.floor(Date.now() / 1e3);
+  const payload = encodeBase64Url(JSON.stringify({
+    iss: "romaji-line-translator",
+    email: identity.email,
+    sub: identity.sub,
+    iat: now,
+    exp: now + SESSION_SECONDS
+  }));
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return `${SESSION_COOKIE}=${payload}.${encodeBase64Url(signature)}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Lax`;
+}
+__name(createSessionCookie, "createSessionCookie");
+function clearSessionCookie() {
+  return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+__name(clearSessionCookie, "clearSessionCookie");
+async function getAuthorizedIdentity(request, env) {
+  const allowedEmails = getAllowedEmails(env);
+  const secret = env.GOOGLE_SESSION_SECRET;
+  if (!allowedEmails.length || !secret || new TextEncoder().encode(String(secret)).byteLength < 32) {
+    return { ok: false, status: 503, error: "Google\u30ED\u30B0\u30A4\u30F3\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" };
+  }
+  const value = getCookie(request, SESSION_COOKIE);
+  if (!value) return { ok: false, status: 401, error: "Google\u30ED\u30B0\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002" };
+  try {
+    const parts = value.split(".");
+    if (parts.length !== 2) throw new Error("invalid_session");
+    const [payloadPart, signaturePart] = parts;
+    const key = await importSessionKey(secret);
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      decodeBase64Url(signaturePart),
+      new TextEncoder().encode(payloadPart)
+    );
+    if (!valid) throw new Error("invalid_session_signature");
+    const session = decodeJsonPart(payloadPart);
+    const now = Math.floor(Date.now() / 1e3);
+    const email = String(session.email || "").trim().toLowerCase();
+    const sub = String(session.sub || "").trim();
+    if (session.iss !== "romaji-line-translator" || !Number.isFinite(session.exp) || session.exp <= now || !Number.isFinite(session.iat) || session.iat > now + 60 || !email || !sub) throw new Error("invalid_session_claims");
+    if (!allowedEmails.includes(email)) {
+      return { ok: false, status: 403, error: "\u3053\u306EGoogle\u30A2\u30AB\u30A6\u30F3\u30C8\u306B\u306F\u5229\u7528\u6A29\u9650\u304C\u3042\u308A\u307E\u305B\u3093\u3002" };
+    }
+    return { ok: true, email, sub };
+  } catch {
+    return { ok: false, status: 401, error: "\u30ED\u30B0\u30A4\u30F3\u306E\u6709\u52B9\u671F\u9650\u304C\u5207\u308C\u307E\u3057\u305F\u3002\u518D\u5EA6\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u304F\u3060\u3055\u3044\u3002" };
+  }
+}
+__name(getAuthorizedIdentity, "getAuthorizedIdentity");
+function isSameOriginPost(request) {
+  if (request.method !== "POST" && request.method !== "DELETE") return true;
+  const origin = request.headers.get("Origin");
+  if (!origin) return false;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+__name(isSameOriginPost, "isSameOriginPost");
+
+// api/auth/config.js
+function onRequestGet({ env }) {
+  const secretLength = new TextEncoder().encode(String(env.GOOGLE_SESSION_SECRET || "")).byteLength;
+  if (!env.GOOGLE_CLIENT_ID || !getAllowedEmails(env).length || secretLength < 32) {
+    return Response.json({ error: "Google\u30ED\u30B0\u30A4\u30F3\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, {
+      status: 503,
+      headers: { "Cache-Control": "no-store" }
+    });
+  }
+  return Response.json({ clientId: env.GOOGLE_CLIENT_ID }, {
+    headers: { "Cache-Control": "no-store" }
+  });
+}
+__name(onRequestGet, "onRequestGet");
+
+// lib/read-json-limited.js
+async function readJsonLimited(request, maxBytes = 1e6) {
+  const declaredLength = Number(request.headers.get("Content-Length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return { ok: false, tooLarge: true };
+  if (!request.body) return { ok: false, tooLarge: false };
+  const reader = request.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      return { ok: false, tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(body)) };
+  } catch {
+    return { ok: false, tooLarge: false };
+  }
+}
+__name(readJsonLimited, "readJsonLimited");
+function hasJsonContentType(request) {
+  return /^application\/json(?:\s*;|$)/i.test(request.headers.get("Content-Type") || "");
+}
+__name(hasJsonContentType, "hasJsonContentType");
+
+// api/auth/session.js
+function json(body, status = 200, headers = {}) {
+  return Response.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store", ...headers }
+  });
+}
+__name(json, "json");
+async function onRequestGet2({ request, env }) {
+  const identity = await getAuthorizedIdentity(request, env);
+  if (!identity.ok) return json({ error: identity.error }, identity.status);
+  return json({ authenticated: true, user: { email: identity.email } });
+}
+__name(onRequestGet2, "onRequestGet");
+async function onRequestPost({ request, env }) {
+  if (!isSameOriginPost(request)) return json({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  if (!hasJsonContentType(request)) return json({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
+  const parsed = await readJsonLimited(request, 24e3);
+  if (parsed.tooLarge) return json({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
+  if (!parsed.ok) return json({ error: "\u30ED\u30B0\u30A4\u30F3\u60C5\u5831\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  const token = parsed.value?.credential;
+  if (typeof token !== "string" || token.length > 2e4) {
+    return json({ error: "Google\u30ED\u30B0\u30A4\u30F3\u60C5\u5831\u304C\u3042\u308A\u307E\u305B\u3093\u3002" }, 400);
+  }
+  const clientId = String(env.GOOGLE_CLIENT_ID || "").trim();
+  const allowedEmails = getAllowedEmails(env);
+  const secretLength = new TextEncoder().encode(String(env.GOOGLE_SESSION_SECRET || "")).byteLength;
+  if (!clientId || !allowedEmails.length || secretLength < 32) {
+    return json({ error: "Google\u30ED\u30B0\u30A4\u30F3\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  }
+  try {
+    const identity = await verifyGoogleIdToken(token, clientId);
+    if (!allowedEmails.includes(identity.email)) {
+      return json({ error: "\u3053\u306EGoogle\u30A2\u30AB\u30A6\u30F3\u30C8\u306B\u306F\u5229\u7528\u6A29\u9650\u304C\u3042\u308A\u307E\u305B\u3093\u3002" }, 403);
+    }
+    const cookie = await createSessionCookie(identity, env);
+    return json({ authenticated: true, user: { email: identity.email } }, 200, { "Set-Cookie": cookie });
+  } catch {
+    return json({ error: "Google\u30ED\u30B0\u30A4\u30F3\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002" }, 401);
+  }
+}
+__name(onRequestPost, "onRequestPost");
+function onRequestDelete({ request }) {
+  if (!isSameOriginPost(request)) return json({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  return json({ authenticated: false }, 200, { "Set-Cookie": clearSessionCookie() });
+}
+__name(onRequestDelete, "onRequestDelete");
+
+// api/history.js
+var HISTORY_LIMIT = 10;
+var MAX_TEXT_LENGTH = 12e4;
+function json2(body, status = 200) {
+  return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
+}
+__name(json2, "json");
+async function onRequestGet3({ request, env }) {
+  const auth = await getAuthorizedIdentity(request, env);
+  if (!auth.ok) return json2({ error: auth.error }, auth.status);
+  if (!env.HISTORY_DB) return json2({ error: "\u5C65\u6B74\u4FDD\u5B58\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  const { results } = await env.HISTORY_DB.prepare(
+    "SELECT id, mode, source, result, created_at AS createdAt FROM history WHERE user_email = ? AND user_sub = ? ORDER BY created_at DESC, rowid DESC LIMIT ?"
+  ).bind(auth.email, auth.sub, HISTORY_LIMIT).all();
+  return json2({ history: results || [] });
+}
+__name(onRequestGet3, "onRequestGet");
+async function onRequestPost2({ request, env }) {
+  if (!isSameOriginPost(request)) return json2({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  const auth = await getAuthorizedIdentity(request, env);
+  if (!auth.ok) return json2({ error: auth.error }, auth.status);
+  if (!env.HISTORY_DB) return json2({ error: "\u5C65\u6B74\u4FDD\u5B58\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  if (!hasJsonContentType(request)) return json2({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
+  const parsed = await readJsonLimited(request);
+  if (parsed.tooLarge) return json2({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
+  if (!parsed.ok) return json2({ error: "JSON\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  const { mode, source, result } = parsed.value || {};
+  if (!["romaji", "japanese"].includes(mode) || typeof source !== "string" || !source.trim() || source.length > MAX_TEXT_LENGTH || typeof result !== "string" || !result.trim() || result.length > MAX_TEXT_LENGTH) return json2({ error: "\u5C65\u6B74\u306E\u5185\u5BB9\u304C\u4E0D\u6B63\u304B\u3001\u9577\u3059\u304E\u307E\u3059\u3002" }, 400);
+  const id = crypto.randomUUID();
+  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  await env.HISTORY_DB.batch([
+    env.HISTORY_DB.prepare(
+      "INSERT INTO history (id, user_email, user_sub, mode, source, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(id, auth.email, auth.sub, mode, source, result, createdAt),
+    env.HISTORY_DB.prepare(
+      "DELETE FROM history WHERE user_email = ? AND user_sub = ? AND id NOT IN (SELECT id FROM history WHERE user_email = ? AND user_sub = ? ORDER BY created_at DESC, rowid DESC LIMIT ?)"
+    ).bind(auth.email, auth.sub, auth.email, auth.sub, HISTORY_LIMIT)
+  ]);
+  const { results } = await env.HISTORY_DB.prepare(
+    "SELECT id, mode, source, result, created_at AS createdAt FROM history WHERE user_email = ? AND user_sub = ? ORDER BY created_at DESC, rowid DESC LIMIT ?"
+  ).bind(auth.email, auth.sub, HISTORY_LIMIT).all();
+  return json2({ history: results || [] }, 201);
+}
+__name(onRequestPost2, "onRequestPost");
+
 // ../src/lib/gemini.js
 var GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta";
+var DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+var BATCH_SIZE = 8;
+var REQUEST_TIMEOUT_MS = 1e4;
+var MAX_REQUEST_ATTEMPTS = 2;
+var RETRYABLE_STATUS_CODES = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          output: { type: "string" }
+        },
+        required: ["id", "output"]
+      }
+    }
+  },
+  required: ["results"]
+};
 var PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:AI|OK|LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
 var PRODUCT_ALIASES = /* @__PURE__ */ new Map([
   ["AI", ["AI", "\u30A8\u30FC\u30A2\u30A4"]],
@@ -32,6 +363,20 @@ function safeString(value) {
   return String(value ?? "");
 }
 __name(safeString, "safeString");
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+__name(wait, "wait");
+function createError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+__name(createError, "createError");
+function isRetryableError(error) {
+  return error?.code === "timeout" || error?.code === "rate_limit" || error?.code === "transient_service";
+}
+__name(isRetryableError, "isRetryableError");
 function parseResponse(text) {
   const parsed = JSON.parse(text);
   const results = Array.isArray(parsed) ? parsed : parsed?.results;
@@ -65,13 +410,36 @@ function validateOutput(mode, source, output) {
 }
 __name(validateOutput, "validateOutput");
 async function requestBatch(items, { apiKey, model, mode }) {
-  if (!apiKey) throw new Error("configuration");
-  const response = await fetch(`${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: buildTranslatePrompt(mode, items) }] }], generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: "application/json" } })
-  });
-  if (!response.ok) throw new Error("service");
+  if (!apiKey) throw createError("configuration");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: buildTranslatePrompt(mode, items) }] }],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 4096,
+          responseMimeType: "application/json",
+          responseSchema: RESPONSE_SCHEMA
+        }
+      })
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw createError("timeout");
+    throw createError("transient_service");
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) {
+    if (response.status === 429) throw createError("rate_limit");
+    if (RETRYABLE_STATUS_CODES.has(response.status)) throw createError("transient_service");
+    throw createError("service");
+  }
   const data = await response.json().catch(() => {
     throw new Error("invalid_json");
   });
@@ -87,23 +455,55 @@ async function requestBatch(items, { apiKey, model, mode }) {
   });
 }
 __name(requestBatch, "requestBatch");
+async function requestBatchWithRetry(items, options) {
+  let lastError;
+  for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+    try {
+      return await requestBatch(items, options);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableError(error) || attempt === MAX_REQUEST_ATTEMPTS - 1) throw error;
+      await wait(300 + Math.floor(Math.random() * 200));
+    }
+  }
+  throw lastError;
+}
+__name(requestBatchWithRetry, "requestBatchWithRetry");
+async function translateIsolatedItems(items, options, batchError) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const worker = /* @__PURE__ */ __name(async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      try {
+        results[index] = (await requestBatchWithRetry([item], options))[0];
+      } catch (itemError) {
+        results[index] = { id: item.id, status: "error", output: "", errorCode: errorCode(itemError || batchError) };
+      }
+    }
+  }, "worker");
+  await Promise.all(Array.from({ length: Math.min(3, items.length) }, worker));
+  return results;
+}
+__name(translateIsolatedItems, "translateIsolatedItems");
 function errorCode(error) {
-  return ["configuration", "service", "invalid_json", "count_mismatch", "validation"].includes(error?.message) ? error.message : "service";
+  const code = error?.code || error?.message;
+  return ["configuration", "service", "transient_service", "rate_limit", "timeout", "invalid_json", "count_mismatch", "validation"].includes(code) ? code : "service";
 }
 __name(errorCode, "errorCode");
-async function translateItems(items, { apiKey, model = "gemini-3.5-flash", mode = "romaji" } = {}) {
+async function translateItems(items, { apiKey, model = DEFAULT_GEMINI_MODEL, mode = "romaji" } = {}) {
   const results = [];
-  for (let index = 0; index < items.length; index += 12) {
-    const chunk = items.slice(index, index + 12);
+  for (let index = 0; index < items.length; index += BATCH_SIZE) {
+    const chunk = items.slice(index, index + BATCH_SIZE);
     try {
-      results.push(...await requestBatch(chunk, { apiKey, model, mode }));
+      results.push(...await requestBatchWithRetry(chunk, { apiKey, model, mode }));
     } catch (batchError) {
-      for (const item of chunk) {
-        try {
-          results.push(...await requestBatch([item], { apiKey, model, mode }));
-        } catch (itemError) {
-          results.push({ id: item.id, status: "error", output: "", errorCode: errorCode(itemError || batchError) });
-        }
+      if (isRetryableError(batchError)) {
+        results.push(...chunk.map((item) => ({ id: item.id, status: "error", output: "", errorCode: errorCode(batchError) })));
+      } else {
+        results.push(...await translateIsolatedItems(chunk, { apiKey, model, mode }, batchError));
       }
     }
   }
@@ -148,37 +548,90 @@ function validateTranslateRequest(body) {
 __name(validateTranslateRequest, "validateTranslateRequest");
 
 // api/translate.js
-async function onRequestPost(context) {
+function json3(body, status = 200) {
+  return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
+}
+__name(json3, "json");
+async function onRequestPost3(context) {
   const { request, env } = context;
-  const body = await request.json().catch(() => ({}));
+  if (!isSameOriginPost(request)) return json3({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  const auth = await getAuthorizedIdentity(request, env);
+  if (!auth.ok) return json3({ error: auth.error }, auth.status);
+  if (!hasJsonContentType(request)) return json3({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
+  const parsed = await readJsonLimited(request);
+  if (parsed.tooLarge) return json3({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
+  if (!parsed.ok) return json3({ error: "JSON\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  const body = parsed.value;
   const validation = validateTranslateRequest(body);
-  if (!validation.ok) return Response.json({ error: validation.error }, { status: validation.status });
-  if (!env.GEMINI_API_KEY) return Response.json({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u306E\u8A2D\u5B9A\u304C\u3042\u308A\u307E\u305B\u3093\u3002" }, { status: 500 });
+  if (!validation.ok) return json3({ error: validation.error }, validation.status);
+  if (!env.GEMINI_API_KEY) return json3({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u306E\u8A2D\u5B9A\u304C\u3042\u308A\u307E\u305B\u3093\u3002" }, 500);
   try {
     const results = await translateItems(validation.items, {
       apiKey: env.GEMINI_API_KEY,
-      model: env.GEMINI_MODEL || "gemini-3.5-flash",
+      model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
       mode: validation.mode
     });
-    return Response.json({ results });
+    return json3({ results });
   } catch {
-    return Response.json({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u3092\u5229\u7528\u3067\u304D\u307E\u305B\u3093\u3002" }, { status: 503 });
+    return json3({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u3092\u5229\u7528\u3067\u304D\u307E\u305B\u3093\u3002" }, 503);
   }
 }
-__name(onRequestPost, "onRequestPost");
+__name(onRequestPost3, "onRequestPost");
 
-// ../.wrangler/tmp/pages-NB73sJ/functionsRoutes-0.6462422294011152.mjs
+// ../.wrangler/tmp/pages-05St13/functionsRoutes-0.3990662004882125.mjs
 var routes = [
+  {
+    routePath: "/api/auth/config",
+    mountPath: "/api/auth",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet]
+  },
+  {
+    routePath: "/api/auth/session",
+    mountPath: "/api/auth",
+    method: "DELETE",
+    middlewares: [],
+    modules: [onRequestDelete]
+  },
+  {
+    routePath: "/api/auth/session",
+    mountPath: "/api/auth",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet2]
+  },
+  {
+    routePath: "/api/auth/session",
+    mountPath: "/api/auth",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost]
+  },
+  {
+    routePath: "/api/history",
+    mountPath: "/api",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet3]
+  },
+  {
+    routePath: "/api/history",
+    mountPath: "/api",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost2]
+  },
   {
     routePath: "/api/translate",
     mountPath: "/api",
     method: "POST",
     middlewares: [],
-    modules: [onRequestPost]
+    modules: [onRequestPost3]
   }
 ];
 
-// ../../../../.npm/_npx/095711ed2bffd7f3/node_modules/path-to-regexp/dist.es2015/index.js
+// ../../../../.npm/_npx/2d6078b16d31eafe/node_modules/path-to-regexp/dist.es2015/index.js
 function lexer(str) {
   var tokens = [];
   var i = 0;
@@ -504,7 +957,7 @@ function pathToRegexp(path, keys, options) {
 }
 __name(pathToRegexp, "pathToRegexp");
 
-// ../../../../.npm/_npx/095711ed2bffd7f3/node_modules/wrangler/templates/pages-template-worker.ts
+// ../../../../.npm/_npx/2d6078b16d31eafe/node_modules/wrangler/templates/pages-template-worker.ts
 var escapeRegex = /[.+?^${}()|[\]\\]/g;
 function* executeRequest(request) {
   const requestPath = new URL(request.url).pathname;

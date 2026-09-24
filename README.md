@@ -11,7 +11,16 @@
 ├── .env.example
 ├── functions
 │   └── api
-│       └── translate.js
+│       ├── history.js
+│       ├── translate.js
+│       └── auth
+│           ├── config.js
+│           └── session.js
+├── migrations
+│   └── 0001_history.sql
+├── functions/lib
+│   ├── google-auth.js
+│   └── read-json-limited.js
 ├── src
 │   └── lib
 │       ├── api-request.js
@@ -24,7 +33,9 @@
 └── test
     ├── api-request.test.js
     ├── core.test.js
-    └── gemini.test.js
+    ├── gemini.test.js
+    ├── google-auth.test.js
+    └── history-api.test.js
 ```
 
 ## セットアップ
@@ -38,7 +49,7 @@ cp .env.example .env
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 PORT=3000
 ```
 
@@ -88,6 +99,18 @@ Cloudflare Pages では次の形で載せられます。
 4. Environment variables に `GEMINI_API_KEY` と必要なら `GEMINI_MODEL` を設定
 
 `functions/api/translate.js` が Pages Functions として動き、`/api/translate` を処理します。
+
+### Googleログインと変換履歴
+
+- Cloudflare Access / Zero Trustは使用しません。Google Identity Servicesでログインし、Pages FunctionsがGoogle ID tokenを検証してセッションCookieを発行します。
+- Google CloudでOAuthクライアント（ウェブアプリ）を作り、本番サイトのオリジンを「承認済みの JavaScript 生成元」に登録します。ログインはポップアップ方式のため、リダイレクトURIは使いません。
+- Pages Functionsの設定は `wrangler.toml` で管理し、本番環境だけに `HISTORY_DB` を接続します。Pages production secretsに `GOOGLE_CLIENT_ID`（公開可能なOAuthクライアントID）、`GOOGLE_ALLOWED_EMAILS`（許可アドレス一覧）、`GOOGLE_SESSION_SECRET`（32バイト以上のランダムな秘密値）を設定します。`GEMINI_API_KEY`も維持します。秘密値や許可アドレスをコードや公開リポジトリに書きません。
+- FunctionsはGoogle署名鍵・issuer・audience・有効期限・メール検証済み状態を確認し、許可リストと照合します。12時間のHttpOnly/Secure/SameSiteセッションCookieを発行し、失効後は再ログインします。
+- 履歴の所有者は検証済みGoogleのemailとsubで決めます。D1に `migrations/0001_history.sql` を適用し、Pages FunctionsのD1 binding名を `HISTORY_DB` にします。
+- 成功した変換だけを自動保存し、各Googleアカウントで最新10件を保持します。下書きは保存しません。
+- ActionsはPages FunctionsからAdvanced Mode用の `public/_worker.js` とroutesを生成してからデプロイします。
+
+Google OAuthクライアントとPagesの環境変数・D1 bindingはGoogle Cloud / Cloudflareの各ダッシュボードで設定します。Google Cloudで追加の規約同意や権限付与が表示された場合は、内容を確認してから進めてください。
 
 ## デプロイ設定
 

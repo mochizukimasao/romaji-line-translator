@@ -1,4 +1,27 @@
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+
+const BATCH_SIZE = 8;
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_REQUEST_ATTEMPTS = 2;
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    results: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          output: { type: 'string' }
+        },
+        required: ['id', 'output']
+      }
+    }
+  },
+  required: ['results']
+};
 
 const PROTECTED_TOKEN = /https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[@#][\w-]+|\b(?:AI|OK|LINE|Zoom|Google|ChatGPT)\b|\b\d+(?:[/:.-]\d+)*\b/g;
 const PRODUCT_ALIASES = new Map([
@@ -29,6 +52,20 @@ export function buildTranslatePrompt(mode, items) {
 }
 
 function safeString(value) { return String(value ?? ''); }
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function createError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
+function isRetryableError(error) {
+  return error?.code === 'timeout' || error?.code === 'rate_limit' || error?.code === 'transient_service';
+}
 
 export function parseResponse(text) {
   const parsed = JSON.parse(text);
@@ -65,13 +102,36 @@ export function validateOutput(mode, source, output) {
 }
 
 async function requestBatch(items, { apiKey, model, mode }) {
-  if (!apiKey) throw new Error('configuration');
-  const response = await fetch(`${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: buildTranslatePrompt(mode, items) }] }], generationConfig: { temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json' } })
-  });
-  if (!response.ok) throw new Error('service');
+  if (!apiKey) throw createError('configuration');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${GEMINI_API_URL}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: buildTranslatePrompt(mode, items) }] }],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 4096,
+          responseMimeType: 'application/json',
+          responseSchema: RESPONSE_SCHEMA
+        }
+      })
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw createError('timeout');
+    throw createError('transient_service');
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) {
+    if (response.status === 429) throw createError('rate_limit');
+    if (RETRYABLE_STATUS_CODES.has(response.status)) throw createError('transient_service');
+    throw createError('service');
+  }
   const data = await response.json().catch(() => { throw new Error('invalid_json'); });
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('invalid_json');
@@ -85,21 +145,55 @@ async function requestBatch(items, { apiKey, model, mode }) {
   });
 }
 
-function errorCode(error) { return ['configuration', 'service', 'invalid_json', 'count_mismatch', 'validation'].includes(error?.message) ? error.message : 'service'; }
-
-export async function translateItems(items, { apiKey, model = 'gemini-3.5-flash', mode = 'romaji' } = {}) {
-  const results = [];
-  for (let index = 0; index < items.length; index += 12) {
-    const chunk = items.slice(index, index + 12);
+async function requestBatchWithRetry(items, options) {
+  let lastError;
+  for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
     try {
-      results.push(...await requestBatch(chunk, { apiKey, model, mode }));
+      return await requestBatch(items, options);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableError(error) || attempt === MAX_REQUEST_ATTEMPTS - 1) throw error;
+      await wait(300 + Math.floor(Math.random() * 200));
+    }
+  }
+  throw lastError;
+}
+
+async function translateIsolatedItems(items, options, batchError) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      try {
+        results[index] = (await requestBatchWithRetry([item], options))[0];
+      } catch (itemError) {
+        results[index] = { id: item.id, status: 'error', output: '', errorCode: errorCode(itemError || batchError) };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, items.length) }, worker));
+  return results;
+}
+
+function errorCode(error) {
+  const code = error?.code || error?.message;
+  return ['configuration', 'service', 'transient_service', 'rate_limit', 'timeout', 'invalid_json', 'count_mismatch', 'validation'].includes(code) ? code : 'service';
+}
+
+export async function translateItems(items, { apiKey, model = DEFAULT_GEMINI_MODEL, mode = 'romaji' } = {}) {
+  const results = [];
+  for (let index = 0; index < items.length; index += BATCH_SIZE) {
+    const chunk = items.slice(index, index + BATCH_SIZE);
+    try {
+      results.push(...await requestBatchWithRetry(chunk, { apiKey, model, mode }));
     } catch (batchError) {
-      for (const item of chunk) {
-        try {
-          results.push(...await requestBatch([item], { apiKey, model, mode }));
-        } catch (itemError) {
-          results.push({ id: item.id, status: 'error', output: '', errorCode: errorCode(itemError || batchError) });
-        }
+      if (isRetryableError(batchError)) {
+        results.push(...chunk.map((item) => ({ id: item.id, status: 'error', output: '', errorCode: errorCode(batchError) })));
+      } else {
+        results.push(...await translateIsolatedItems(chunk, { apiKey, model, mode }, batchError));
       }
     }
   }

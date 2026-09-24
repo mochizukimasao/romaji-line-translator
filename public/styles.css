@@ -15,6 +15,8 @@
   box-sizing: border-box;
 }
 
+[hidden] { display: none !important; }
+
 html,
 body {
   min-height: 100%;
@@ -101,6 +103,24 @@ h1 {
   flex: 0 0 auto;
   gap: 12px;
 }
+
+.auth-gate {
+  width: min(460px, 100%);
+  margin: clamp(48px, 12vh, 120px) auto;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.auth-gate h2 { margin: 0; font-size: 1.15rem; }
+.auth-gate p { color: var(--muted); font-size: 0.9rem; line-height: 1.6; }
+#googleSignIn { display: flex; justify-content: center; min-height: 42px; margin-top: 18px; }
+.auth-message { min-height: 1.3em; margin-bottom: 0; color: var(--danger) !important; }
+.auth-controls { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0 0 10px; }
+.auth-account { color: var(--muted); font-size: 0.78rem; }
 
 .toolbar {
   gap: 4px;
@@ -423,6 +443,34 @@ textarea:focus-visible {
   color: var(--muted);
   text-align: center;
 }
+
+.history-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.history-header h2 { margin: 0; font-size: 0.92rem; }
+.history-header p { margin: 4px 0 0; color: var(--muted); font-size: 0.72rem; }
+.history-refresh, .history-restore { min-height: 34px; padding: 0 10px; font-size: 0.74rem; }
+.history-list { display: grid; gap: 6px; color: var(--muted); font-size: 0.78rem; }
+.history-item { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,0.02); }
+.history-item summary { overflow: hidden; padding: 10px 12px; color: var(--ink); cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
+.history-content { padding: 0 12px 12px; }
+.history-content h3 { margin: 8px 0 4px; color: var(--muted); font-size: 0.7rem; }
+.history-content pre { max-height: 240px; overflow: auto; margin: 0; padding: 9px; border-radius: 6px; background: rgba(0,0,0,0.16); color: var(--ink); font: 0.78rem/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-restore { margin-top: 10px; }
 
 .result-row {
   display: grid;

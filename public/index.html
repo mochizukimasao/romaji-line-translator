@@ -16,7 +16,7 @@
         </div>
         <div class="topbar-tools">
           <div class="status-pill status-pending" id="globalStatus" data-tooltip="状態: 待機中" aria-label="状態: 待機中">待機中</div>
-          <div class="toolbar" aria-label="表示と変換の設定">
+          <div class="toolbar" id="translatorTools" aria-label="表示と変換の設定" hidden>
             <div class="toolbar-group" role="tablist" aria-label="変換モード">
               <button id="modeRomaji" class="tool-button active" type="button" data-mode="romaji" role="tab" aria-selected="true" aria-label="ローマ字変換モード" data-tooltip="ローマ字変換モード">
                 <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 6.5h14M5 12h9M5 17.5h14"/><path d="M17 9.5v7m-2.5-2.5L17 17l2.5-3"/></svg>
@@ -52,7 +52,19 @@
         </div>
       </header>
 
-      <section class="workspace" aria-label="日本語変換ワークスペース">
+      <section id="authGate" class="auth-gate" aria-labelledby="authTitle">
+        <h2 id="authTitle">Googleアカウントでログイン</h2>
+        <p>許可されたアカウントでログインすると、変換とアカウント別の履歴を利用できます。</p>
+        <div id="googleSignIn"></div>
+        <p id="authMessage" class="auth-message" role="status" aria-live="polite"></p>
+      </section>
+
+      <div id="authControls" class="auth-controls" hidden>
+        <span id="authAccount" class="auth-account"></span>
+        <button id="logoutButton" class="history-refresh" type="button">ログアウト</button>
+      </div>
+
+      <section class="workspace" id="workspace" aria-label="日本語変換ワークスペース" hidden>
         <div class="panel input-panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-dot" aria-hidden="true"></span><label for="sourceText">入力</label></div>
@@ -91,6 +103,17 @@
           </div>
           <div id="results" class="results empty">句読点や改行で確定した区切りから漢字かな変換・日本語整形の結果が表示されます。</div>
         </div>
+      </section>
+
+      <section class="history-panel" id="historyPanel" aria-label="変換履歴" hidden>
+        <div class="history-header">
+          <div>
+            <h2>最近の履歴</h2>
+            <p>変換完了後に自動保存・最大10件。このGoogleアカウントだけに表示されます。</p>
+          </div>
+          <button id="refreshHistory" class="history-refresh" type="button">更新</button>
+        </div>
+        <div id="historyList" class="history-list" aria-live="polite">履歴を読み込み中…</div>
       </section>
 
       <p id="message" class="message" role="status" aria-live="polite"></p>

@@ -22,8 +22,18 @@ const clearButton = document.querySelector('#clearAll');
 const modeHint = document.querySelector('#modeHint');
 const modeButtons = Array.from(document.querySelectorAll('[data-mode]'));
 const heightButtons = Array.from(document.querySelectorAll('[data-height]'));
+const historyList = document.querySelector('#historyList');
+const refreshHistoryButton = document.querySelector('#refreshHistory');
+const authGate = document.querySelector('#authGate');
+const authMessage = document.querySelector('#authMessage');
+const googleSignIn = document.querySelector('#googleSignIn');
+const authControls = document.querySelector('#authControls');
+const authAccount = document.querySelector('#authAccount');
+const logoutButton = document.querySelector('#logoutButton');
+const translatorTools = document.querySelector('#translatorTools');
+const workspace = document.querySelector('#workspace');
+const historyPanel = document.querySelector('#historyPanel');
 const DISPLAY_HEIGHT_STORAGE_KEY = 'romaji-line-translator.display-height';
-
 const modeMeta = {
   romaji: { hint: '文の区切り: 句読点・改行', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
   japanese: { hint: '文の区切り: 改行', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
@@ -35,6 +45,9 @@ let requestSerial = 0;
 let documentModel = buildDocument('', currentMode, requestVersion);
 let state = new Map();
 let displayHeight = readDisplayHeight();
+let historyRecords = [];
+let authenticatedUser = null;
+let googleSignInInitialized = false;
 
 function readDisplayHeight() {
   try {
@@ -47,6 +60,17 @@ function readDisplayHeight() {
 function setMessage(text = '', isError = false) {
   message.textContent = text;
   message.classList.toggle('error', isError);
+}
+
+function setAuthenticatedUser(user) {
+  authenticatedUser = user || null;
+  const authenticated = Boolean(authenticatedUser);
+  authGate.hidden = authenticated;
+  workspace.hidden = !authenticated;
+  historyPanel.hidden = !authenticated;
+  translatorTools.hidden = !authenticated;
+  authControls.hidden = !authenticated;
+  authAccount.textContent = authenticated ? authenticatedUser.email : '';
 }
 
 function getItem(item) {
@@ -104,6 +128,7 @@ function shouldFollowResults() {
 
 function render() {
   const items = documentModel.flatMap((line) => line.segments);
+  const copy = composeCopyText(documentModel, getItem);
   const done = items.filter((item) => getItem(item).status === 'done').length;
   const followResults = shouldFollowResults();
   const visibleLineCount = sourceText.value ? documentModel.length - (sourceText.value.endsWith('\n') ? 1 : 0) : 0;
@@ -118,6 +143,9 @@ function render() {
   globalStatus.setAttribute('aria-label', `状態: ${statusText}`);
   modeHint.textContent = modeMeta[currentMode].hint;
   convertAllButton.disabled = status === 'loading';
+  copyButton.disabled = !copy.ready;
+  copyButton.dataset.tooltip = copy.ready ? '変換結果をコピー' : 'すべての変換が完了するとコピーできます';
+  copyButton.setAttribute('aria-label', copy.ready ? '変換結果をコピー' : 'すべての変換が完了するとコピーできます');
 
   if (!documentModel.some((line) => line.segments.length)) {
     results.className = 'results empty';
@@ -158,18 +186,134 @@ function render() {
   if (followResults) results.scrollTop = results.scrollHeight;
 }
 
+function clearPrivateView() {
+  historyRecords = [];
+  sourceText.value = '';
+  state.clear();
+  rebuildDocument();
+  renderHistory();
+  render();
+}
+
+async function requireLogin(messageText = 'ログインの有効期限が切れました。再度ログインしてください。') {
+  setAuthenticatedUser(null);
+  clearPrivateView();
+  authMessage.textContent = messageText;
+  await initializeGoogleSignIn();
+}
+
+function loadGoogleIdentityServices() {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.addEventListener('load', resolve, { once: true });
+    script.addEventListener('error', () => reject(new Error('Googleログインを読み込めませんでした。')), { once: true });
+    document.head.append(script);
+  });
+}
+
+async function handleGoogleCredential(response) {
+  authMessage.textContent = 'Googleアカウントを確認しています…';
+  try {
+    const result = await fetch('/api/auth/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: response.credential })
+    });
+    const data = await result.json().catch(() => ({}));
+    if (!result.ok) throw new Error(data.error || 'Googleログインに失敗しました。');
+    setAuthenticatedUser(data.user);
+    authMessage.textContent = '';
+    setMessage(`${data.user.email} でログインしました。`);
+    await loadHistory();
+  } catch (error) {
+    authMessage.textContent = error.message || 'Googleログインに失敗しました。';
+  }
+}
+
+async function initializeGoogleSignIn() {
+  if (googleSignInInitialized || authenticatedUser) return;
+  googleSignInInitialized = true;
+  try {
+    const configResponse = await fetch('/api/auth/config', { cache: 'no-store' });
+    const config = await configResponse.json().catch(() => ({}));
+    if (!configResponse.ok || !config.clientId) {
+      authMessage.textContent = config.error || 'Googleログインの設定が完了していません。';
+      return;
+    }
+    await loadGoogleIdentityServices();
+    window.google.accounts.id.initialize({
+      client_id: config.clientId,
+      callback: handleGoogleCredential,
+      auto_select: false,
+      cancel_on_tap_outside: true
+    });
+    window.google.accounts.id.renderButton(googleSignIn, {
+      type: 'standard',
+      theme: 'outline',
+      size: 'large',
+      text: 'signin_with',
+      shape: 'pill',
+      width: 260
+    });
+  } catch (error) {
+    authMessage.textContent = error.message || 'Googleログインを読み込めませんでした。';
+  }
+}
+
+async function initializeAuth() {
+  setAuthenticatedUser(null);
+  authMessage.textContent = 'ログイン状態を確認しています…';
+  try {
+    const response = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.authenticated && data.user?.email) {
+      setAuthenticatedUser(data.user);
+      authMessage.textContent = '';
+      await loadHistory();
+      return;
+    }
+    authMessage.textContent = '';
+    await initializeGoogleSignIn();
+  } catch {
+    authMessage.textContent = 'ログイン状態を確認できませんでした。ページを再読み込みしてください。';
+  }
+}
+
+async function logout() {
+  try {
+    const response = await fetch('/api/auth/session', {
+      method: 'DELETE', credentials: 'same-origin'
+    });
+    if (!response.ok) throw new Error('ログアウトできませんでした。');
+    window.google?.accounts?.id?.disableAutoSelect?.();
+    clearPrivateView();
+    setAuthenticatedUser(null);
+    authMessage.textContent = 'ログアウトしました。';
+    googleSignInInitialized = false;
+    await initializeGoogleSignIn();
+  } catch (error) {
+    setMessage(error.message || 'ログアウトできませんでした。', true);
+  }
+}
+
 async function requestTranslation(items, mode) {
   const response = await fetch('/api/translate', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode, items: items.map((item) => ({ id: item.id, text: item.source })) })
   });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) void requireLogin(data.error);
   if (!response.ok) throw new Error(data.error || '変換サービスを利用できません。');
   if (!Array.isArray(data.results)) throw new Error('変換結果を読み取れませんでした。');
   return data.results;
 }
 
 async function translateTargets(targets, successMessage = '') {
+  const translatedDocumentVersion = requestVersion;
   const currentTargets = targets.map((item) => getItem(item));
   const unique = currentTargets.filter((item, index, list) => list.findIndex((other) => other.id === item.id) === index);
   if (!unique.length) return;
@@ -215,13 +359,103 @@ async function translateTargets(targets, successMessage = '') {
     if (appliedError) setMessage(error?.message || '変換サービスを利用できません。', true);
   }
   render();
+  if (translatedDocumentVersion === requestVersion && getDocumentStatus(documentModel, getItem) === 'done') {
+    void saveHistory(translatedDocumentVersion);
+  }
 }
 
+function renderHistory() {
+  if (!historyList) return;
+  if (!historyRecords.length) {
+    historyList.textContent = '保存された履歴はありません。';
+    return;
+  }
+
+  historyList.replaceChildren(...historyRecords.map((record) => {
+    const item = document.createElement('details');
+    item.className = 'history-item';
+    const summary = document.createElement('summary');
+    const date = new Date(record.createdAt);
+    const dateText = Number.isNaN(date.valueOf()) ? '' : new Intl.DateTimeFormat('ja-JP', {
+      dateStyle: 'medium', timeStyle: 'short'
+    }).format(date);
+    const preview = record.source.replace(/\s+/g, ' ').slice(0, 72);
+    summary.textContent = `${dateText} · ${preview}${record.source.length > 72 ? '…' : ''}`;
+
+    const content = document.createElement('div');
+    content.className = 'history-content';
+    const modeLabel = document.createElement('h3');
+    modeLabel.textContent = record.mode === 'japanese' ? '日本語整形' : 'ローマ字変換';
+    const sourceLabel = document.createElement('h3');
+    sourceLabel.textContent = '入力';
+    const sourceValue = document.createElement('pre');
+    sourceValue.textContent = record.source;
+    const resultLabel = document.createElement('h3');
+    resultLabel.textContent = '変換結果';
+    const resultValue = document.createElement('pre');
+    resultValue.textContent = record.result;
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'history-restore';
+    restore.textContent = 'この入力を編集欄に戻す';
+    restore.addEventListener('click', () => {
+      setMode(record.mode);
+      sourceText.value = record.source;
+      rebuildDocument();
+      resizeSourceText();
+      render();
+      setMessage('入力を戻しました。必要に応じてもう一度変換してください。');
+      sourceText.focus();
+    });
+    content.append(modeLabel, sourceLabel, sourceValue, resultLabel, resultValue, restore);
+    item.append(summary, content);
+    return item;
+  }));
+}
+
+async function loadHistory() {
+  if (!historyList) return;
+  historyList.textContent = '履歴を読み込み中…';
+  try {
+    const response = await fetch('/api/history', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      await requireLogin(data.error);
+      return;
+    }
+    if (!response.ok) throw new Error(data.error || '履歴を読み込めませんでした。');
+    historyRecords = Array.isArray(data.history) ? data.history : [];
+    renderHistory();
+  } catch (error) {
+    historyList.textContent = error.message || '履歴を読み込めませんでした。';
+  }
+}
+
+async function saveHistory(expectedVersion) {
+  const copy = composeCopyText(documentModel, getItem);
+  if (requestVersion !== expectedVersion || !copy.ready || !sourceText.value.trim()) return;
+  try {
+    const response = await fetch('/api/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: currentMode, source: sourceText.value, result: copy.text })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      await requireLogin(data.error);
+      return;
+    }
+    if (!response.ok) throw new Error(data.error || '履歴を保存できませんでした。');
+    historyRecords = Array.isArray(data.history) ? data.history : [];
+    renderHistory();
+  } catch (error) {
+    setMessage(`変換は完了しましたが、履歴を保存できませんでした。${error.message ? ` ${error.message}` : ''}`, true);
+  }
+}
 function translateAll() {
   const targets = getAllTranslatableItems(documentModel, getItem);
   if (!targets.length) {
     const status = getDocumentStatus(documentModel, getItem);
-    if (status === 'error') return setMessage('失敗項目の「再試行」を押してください。', true);
     return setMessage(status === 'done' ? 'すべて変換済みです。' : '変換する入力がありません。', status !== 'done');
   }
   void translateTargets(targets, '全体を変換しました。');
@@ -231,10 +465,33 @@ async function copyResult() {
   const copy = composeCopyText(documentModel, getItem);
   if (!copy.ready) return setMessage('未確定・処理中・失敗の項目があるためコピーできません。', true);
   try {
-    await navigator.clipboard.writeText(copy.text);
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(copy.text);
+    } else if (!copyWithTemporaryTextArea(copy.text)) {
+      throw new Error('clipboard_unavailable');
+    }
     setMessage('変換結果をコピーしました。');
   } catch {
-    setMessage('コピー権限がありません。', true);
+    if (copyWithTemporaryTextArea(copy.text)) {
+      setMessage('変換結果をコピーしました。');
+    } else {
+      setMessage('コピー権限がありません。', true);
+    }
+  }
+}
+
+function copyWithTemporaryTextArea(text) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.setAttribute('readonly', '');
+  textArea.style.position = 'fixed';
+  textArea.style.opacity = '0';
+  document.body.append(textArea);
+  try {
+    textArea.select();
+    return document.execCommand('copy');
+  } finally {
+    textArea.remove();
   }
 }
 
@@ -277,6 +534,8 @@ copyButton.addEventListener('click', () => void copyResult());
 clearButton.addEventListener('click', clearAll);
 modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji')));
 heightButtons.forEach((button) => button.addEventListener('click', () => setDisplayHeight(button.dataset.height, true)));
+refreshHistoryButton?.addEventListener('click', () => void loadHistory());
+logoutButton?.addEventListener('click', () => void logout());
 sourceText.addEventListener('input', () => {
   rebuildDocument();
   setMessage('');
@@ -287,3 +546,4 @@ window.addEventListener('resize', resizeSourceText);
 setDisplayHeight(displayHeight);
 resizeSourceText();
 render();
+void initializeAuth();

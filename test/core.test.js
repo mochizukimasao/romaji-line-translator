@@ -4,60 +4,61 @@ import {
   buildDocument,
   canApplyResult,
   composeCopyText,
+  getAllTranslatableItems,
   getTranslationMessage,
   getTranslatableItems,
   reconcileDocument,
   splitLineIntoSegments
 } from '../public/core.js';
 
-test('romaji newline confirms the preceding line and final unpunctuated text stays draft', () => {
+test('romaji keeps each line as one explicit conversion unit', () => {
   const document = buildDocument('otukaresamadesu\nashita no yotei wo kakunin shitai', 'romaji', 1);
   assert.equal(document[0].segments[0].confirmed, true);
-  assert.equal(document[1].segments[0].confirmed, false);
-  assert.equal(document[1].segments[0].status, 'draft');
+  assert.equal(document[1].segments[0].confirmed, true);
+  assert.equal(document[0].segments[0].source, 'otukaresamadesu');
+  assert.equal(document[1].segments[0].source, 'ashita no yotei wo kakunin shitai');
 });
 
-test('punctuation confirms segments including comma and period', () => {
+test('punctuation and commas stay inside the same conversion unit', () => {
   const segments = splitLineIntoSegments('otukaresamadesu. watashi wa,', 'romaji', true);
   assert.deepEqual(segments.map((segment) => [segment.text, segment.confirmed]), [
-    ['otukaresamadesu.', true],
-    ['watashi wa,', true]
+    ['otukaresamadesu. watashi wa,', true]
   ]);
 });
 
-test('protected URL punctuation stays in one confirmed segment', () => {
+test('URLs stay in their original line unit', () => {
   const segments = splitLineIntoSegments('https://example.com wo mite.', 'romaji', true);
   assert.deepEqual(segments.map((segment) => [segment.text, segment.confirmed]), [
     ['https://example.com wo mite.', true]
   ]);
 });
 
-test('protected email punctuation stays in one segment', () => {
+test('emails stay in their original line unit', () => {
   const segments = splitLineIntoSegments('test@example.com ni okuru.', 'romaji', true);
   assert.deepEqual(segments.map((segment) => [segment.text, segment.confirmed]), [
     ['test@example.com ni okuru.', true]
   ]);
 });
 
-test('protected decimal punctuation stays in one segment', () => {
+test('decimals stay in their original line unit', () => {
   const segments = splitLineIntoSegments('3.14 wo tsukau.', 'romaji', true);
   assert.deepEqual(segments.map((segment) => [segment.text, segment.confirmed]), [
     ['3.14 wo tsukau.', true]
   ]);
 });
 
-test('newline confirms a trailing residual segment after punctuation', () => {
+test('newlines define units regardless of punctuation', () => {
   const document = buildDocument('one. two\nnext', 'romaji', 1);
   assert.deepEqual(
     document[0].segments.map((segment) => [segment.source, segment.confirmed]),
-    [['one.', true], ['two', true]]
+    [['one. two', true]]
   );
 });
 
-test('japanese mode confirms on newline only', () => {
+test('japanese mode also keeps one line in one unit', () => {
   const document = buildDocument('これは一行目\nこれは二行目', 'japanese', 2);
   assert.equal(document[0].segments[0].confirmed, true);
-  assert.equal(document[1].segments[0].confirmed, false);
+  assert.equal(document[1].segments[0].confirmed, true);
 });
 
 test('blank lines are preserved while excluded from API items', () => {
@@ -118,7 +119,7 @@ test('stable item IDs do not contain request versions', () => {
   assert.equal(later.requestVersion, 99);
 });
 
-test('reconcile preserves done state when only an unrelated draft changes', () => {
+test('reconcile preserves done state while another line waits for explicit conversion', () => {
   const previousDocument = buildDocument('one.\nt', 'romaji', 1);
   const doneItem = previousDocument[0].segments[0];
   const previousState = new Map([
@@ -130,7 +131,10 @@ test('reconcile preserves done state when only an unrelated draft changes', () =
   assert.equal(preserved.output, '一つ。');
   assert.equal(preserved.requestVersion, 1);
   assert.equal(next.document[1].segments[0].requestVersion, 2);
-  assert.deepEqual(getTranslatableItems(next.document, (item) => next.state.get(item.id)), []);
+  assert.deepEqual(
+    getTranslatableItems(next.document, (item) => next.state.get(item.id)).map((item) => item.source),
+    ['two']
+  );
 });
 
 test('reconcile preserves an in-flight item and its response token after an unrelated edit', () => {
@@ -147,20 +151,15 @@ test('reconcile preserves an in-flight item and its response token after an unre
   assert.equal(canApplyResult(sentItem, { id: sentItem.id, status: 'ok', output: '一つ。' }, current, 42), true);
 });
 
-test('reconcile resets draft-confirmed transitions to a new item version', () => {
-  const draftDocument = buildDocument('one', 'romaji', 6);
-  const confirmed = reconcileDocument(draftDocument, new Map(), 'one\n', 'romaji', 7);
-  assert.equal(confirmed.document[0].segments[0].confirmed, true);
-  assert.equal(confirmed.document[0].segments[0].status, 'pending');
-  assert.equal(confirmed.document[0].segments[0].requestVersion, 7);
-
-  const draftAgain = reconcileDocument(confirmed.document, confirmed.state, 'one', 'romaji', 8);
-  assert.equal(draftAgain.document[0].segments[0].confirmed, false);
-  assert.equal(draftAgain.document[0].segments[0].status, 'draft');
-  assert.equal(draftAgain.document[0].segments[0].requestVersion, 8);
+test('reconcile creates a new item version when a line changes', () => {
+  const previous = buildDocument('one', 'romaji', 6);
+  const changed = reconcileDocument(previous, new Map(), 'two', 'romaji', 7);
+  assert.equal(changed.document[0].segments[0].confirmed, true);
+  assert.equal(changed.document[0].segments[0].status, 'pending');
+  assert.equal(changed.document[0].segments[0].requestVersion, 7);
 });
 
-test('reconcile preserves errors and automatic targets include pending items only', () => {
+test('reconcile preserves errors while changed lines wait for explicit conversion', () => {
   const previousDocument = buildDocument('one.\nt', 'romaji', 10);
   const failedItem = previousDocument[0].segments[0];
   const previousState = new Map([
@@ -168,7 +167,14 @@ test('reconcile preserves errors and automatic targets include pending items onl
   ]);
   const next = reconcileDocument(previousDocument, previousState, 'one.\ntwo', 'romaji', 11);
   assert.equal(next.state.get(failedItem.id).status, 'error');
-  assert.deepEqual(getTranslatableItems(next.document, (item) => next.state.get(item.id)), []);
+  assert.deepEqual(
+    getTranslatableItems(next.document, (item) => next.state.get(item.id)).map((item) => item.source),
+    ['two']
+  );
+  assert.deepEqual(
+    getAllTranslatableItems(next.document, (item) => next.state.get(item.id)).map((item) => item.source),
+    ['one.', 'two']
+  );
 });
 
 test('completion message reports partial errors instead of success', () => {

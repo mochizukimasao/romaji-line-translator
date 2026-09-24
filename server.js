@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import { translateItems } from './src/lib/gemini.js';
+import { DEFAULT_GEMINI_MODEL, translateItems } from './src/lib/gemini.js';
 import { validateTranslateRequest } from './src/lib/api-request.js';
 
 const app = express();
@@ -16,7 +16,7 @@ app.post('/api/translate', async (req, res) => {
   try {
     const results = await translateItems(validation.items, {
       apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
+      model: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
       mode: validation.mode
     });
     return res.json({ results });
