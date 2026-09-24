@@ -91,8 +91,15 @@ function getItem(item) {
 }
 
 function addSentencePeriod(source, output, mode) {
-  const text = String(output || '').trimEnd();
-  if (!text || /[。！？!?…](?:[」』）》】〕〉”’"')\]]*)$/u.test(text)) return text;
+  let text = String(output || '').trimEnd().replace(/([?!.,])([」』）》】〕〉”’"'）\]\}]*)$/u, (_, mark, closers) => {
+    const japaneseMark = { '?': '？', '!': '！', '.': '。', ',': '、' }[mark];
+    return `${japaneseMark}${closers}`;
+  });
+  text = text.replace(
+    /(です|ます|でした|ました)[ \t]+(?!(?:が|けど|から|ので|のに|し|と|は|も|を|に|へ|で|ね|よ|か|です|ます|でした|ました|でしょう))(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu,
+    '$1。'
+  );
+  if (!text || /[。！？!?…](?:[」』）》】〕〉”’"'）\]\}]*)$/u.test(text)) return text;
 
   const words = String(source || '').trim().split(/\s+/u).filter(Boolean);
   const japaneseCharacters = [...text].filter((character) => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(character)).length;
@@ -100,7 +107,10 @@ function addSentencePeriod(source, output, mode) {
     (words.length >= 2 && japaneseCharacters >= 8) ||
     (mode === 'japanese' && japaneseCharacters >= 12);
 
-  return sentenceLike ? `${text}。` : text;
+  if (!sentenceLike) return text;
+  const sourceEndsInQuestion = /[?？]\s*$/u.test(String(source || '')) ||
+    (mode === 'romaji' && /(?:desu|masu)?ka\s*$/iu.test(String(source || '').trim()));
+  return `${text}${sourceEndsInQuestion ? '？' : '。'}`;
 }
 
 function rebuildDocument() {
