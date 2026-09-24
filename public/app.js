@@ -77,6 +77,19 @@ function getItem(item) {
   return state.get(item.id) || item;
 }
 
+function addSentencePeriod(source, output, mode) {
+  const text = String(output || '').trimEnd();
+  if (!text || /[。！？!?…](?:[」』）》】〕〉”’"')\]]*)$/u.test(text)) return text;
+
+  const words = String(source || '').trim().split(/\s+/u).filter(Boolean);
+  const japaneseCharacters = [...text].filter((character) => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(character)).length;
+  const sentenceLike = words.length >= 3 ||
+    (words.length >= 2 && japaneseCharacters >= 8) ||
+    (mode === 'japanese' && japaneseCharacters >= 12);
+
+  return sentenceLike ? `${text}。` : text;
+}
+
 function rebuildDocument() {
   requestVersion += 1;
   const reconciled = reconcileDocument(
@@ -334,7 +347,13 @@ async function translateTargets(targets, successMessage = '') {
       if (result.status === 'error') {
         state.set(item.id, { ...item, status: 'error', output: '', errorCode: result.errorCode || 'service', token: serial });
       } else if (canApplyResult(item, result, current, serial)) {
-        state.set(item.id, { ...item, status: 'done', output: result.output, errorCode: null, token: serial });
+        state.set(item.id, {
+          ...item,
+          status: 'done',
+          output: addSentencePeriod(item.text, result.output, mode),
+          errorCode: null,
+          token: serial
+        });
       }
     }
     for (const item of unique) {
