@@ -41,7 +41,7 @@
                 <p>安定して使うコツ</p>
                 <ul>
                   <li>ローマ字は1文〜数文ごとに改行する。</li>
-                  <li>入力中は自動変換されない。入力後に⌘+Enter（Windows/LinuxはCtrl+Enter）または「全体を変換」を押す。</li>
+                  <li>変換は⌘+Enter（Windows/LinuxはCtrl+Enter）または「全体を変換」。変換結果の全文コピーは⌘+Shift+Enter（Windows/LinuxはCtrl+Shift+Enter）。</li>
                   <li>一度に5〜10行程度を目安に区切る。</li>
                   <li>急いで書いた日本語は整形モードを使う。</li>
                   <li>長文は分割して変換し、完了後にコピーする。</li>
@@ -77,7 +77,7 @@
               <button id="clearAll" class="icon-button" type="button" aria-label="入力をクリア" data-tooltip="入力をクリア">
                 <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 7h14M10 4h4l1 3M8 7l.8 12h6.4L16 7M10 10v6M14 10v6"/></svg>
               </button>
-              <button id="convertAll" class="icon-button primary-button" type="button" aria-label="全体を変換" data-tooltip="全体を変換（⌘/Ctrl + Enter）">
+              <button id="convertAll" class="icon-button primary-button" type="button" aria-label="全体を変換" data-tooltip="全体を変換（⌘+Enter / Ctrl+Enter）">
                 <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M5 12h12M13 7l5 5-5 5"/><path d="m18.5 4 .4 1.1L20 5.5l-1.1.4-.4 1.1-.4-1.1-1.1-.4 1.1-.4.4-1.1Z"/></svg>
               </button>
             </div>
@@ -97,7 +97,7 @@
               <span class="divider">•</span>
               <span id="totalChars">0 文字</span>
             </div>
-            <button id="copyResult" class="icon-button" type="button" aria-label="変換結果をコピー" data-tooltip="変換結果をコピー">
+            <button id="copyResult" class="icon-button" type="button" aria-label="変換結果をコピー" data-tooltip="変換結果をコピー（⌘+Shift+Enter / Ctrl+Shift+Enter）">
               <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
             </button>
           </div>

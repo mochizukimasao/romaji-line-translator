@@ -144,12 +144,14 @@ function render() {
   modeHint.textContent = modeMeta[currentMode].hint;
   convertAllButton.disabled = status === 'loading';
   copyButton.disabled = !copy.ready;
-  copyButton.dataset.tooltip = copy.ready ? '変換結果をコピー' : 'すべての変換が完了するとコピーできます';
+  copyButton.dataset.tooltip = copy.ready
+    ? '変換結果をコピー（⌘+Shift+Enter / Ctrl+Shift+Enter）'
+    : 'すべての変換が完了するとコピーできます';
   copyButton.setAttribute('aria-label', copy.ready ? '変換結果をコピー' : 'すべての変換が完了するとコピーできます');
 
   if (!documentModel.some((line) => line.segments.length)) {
     results.className = 'results empty';
-    results.textContent = '入力後に「全体を変換」を押すか、⌘+Enter（Windows/LinuxはCtrl+Enter）を押してください。';
+    results.textContent = '⌘+Enterで変換（Windows/LinuxはCtrl+Enter）。完了後は⌘+Shift+Enterで全文コピー（Windows/LinuxはCtrl+Shift+Enter）。';
     return;
   }
 
@@ -519,14 +521,14 @@ function setMode(nextMode) {
 }
 
 convertAllButton.addEventListener('click', translateAll);
-sourceText.addEventListener('keydown', (event) => {
-  if (
-    event.key === 'Enter' &&
-    (event.metaKey || event.ctrlKey) &&
-    !event.isComposing &&
-    event.keyCode !== 229
-  ) {
-    event.preventDefault();
+document.addEventListener('keydown', (event) => {
+  if (!event.metaKey && !event.ctrlKey) return;
+  if (event.altKey || event.isComposing || event.keyCode === 229 || event.key !== 'Enter') return;
+
+  event.preventDefault();
+  if (event.shiftKey) {
+    void copyResult();
+  } else {
     translateAll();
   }
 });
