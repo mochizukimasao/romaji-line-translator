@@ -24,6 +24,16 @@ const modeButtons = Array.from(document.querySelectorAll('[data-mode]'));
 const heightButtons = Array.from(document.querySelectorAll('[data-height]'));
 const historyList = document.querySelector('#historyList');
 const refreshHistoryButton = document.querySelector('#refreshHistory');
+const dictionaryPanel = document.querySelector('#dictionaryPanel');
+const dictionaryDetails = document.querySelector('#dictionaryDetails');
+const dictionaryCount = document.querySelector('#dictionaryCount');
+const dictionaryForm = document.querySelector('#dictionaryForm');
+const dictionaryReading = document.querySelector('#dictionaryReading');
+const dictionaryReplacement = document.querySelector('#dictionaryReplacement');
+const dictionarySubmit = document.querySelector('#dictionarySubmit');
+const dictionaryCancel = document.querySelector('#dictionaryCancel');
+const dictionaryMessage = document.querySelector('#dictionaryMessage');
+const dictionaryList = document.querySelector('#dictionaryList');
 const authGate = document.querySelector('#authGate');
 const authMessage = document.querySelector('#authMessage');
 const googleSignIn = document.querySelector('#googleSignIn');
@@ -46,6 +56,8 @@ let documentModel = buildDocument('', currentMode, requestVersion);
 let state = new Map();
 let displayHeight = readDisplayHeight();
 let historyRecords = [];
+let dictionaryEntries = [];
+let dictionaryEditingId = null;
 let authenticatedUser = null;
 let googleSignInInitialized = false;
 
@@ -68,6 +80,7 @@ function setAuthenticatedUser(user) {
   authGate.hidden = authenticated;
   workspace.hidden = !authenticated;
   historyPanel.hidden = !authenticated;
+  dictionaryPanel.hidden = !authenticated;
   translatorTools.hidden = !authenticated;
   authControls.hidden = !authenticated;
   authAccount.textContent = authenticated ? authenticatedUser.email : '';
@@ -203,10 +216,13 @@ function render() {
 
 function clearPrivateView() {
   historyRecords = [];
+  dictionaryEntries = [];
+  cancelDictionaryEdit();
   sourceText.value = '';
   state.clear();
   rebuildDocument();
   renderHistory();
+  renderDictionary();
   render();
 }
 
@@ -243,7 +259,7 @@ async function handleGoogleCredential(response) {
     setAuthenticatedUser(data.user);
     authMessage.textContent = '';
     setMessage(`${data.user.email} でログインしました。`);
-    await loadHistory();
+    await Promise.all([loadHistory(), loadDictionary()]);
   } catch (error) {
     authMessage.textContent = error.message || 'Googleログインに失敗しました。';
   }
@@ -288,7 +304,7 @@ async function initializeAuth() {
     if (response.ok && data.authenticated && data.user?.email) {
       setAuthenticatedUser(data.user);
       authMessage.textContent = '';
-      await loadHistory();
+      await Promise.all([loadHistory(), loadDictionary()]);
       return;
     }
     authMessage.textContent = '';
@@ -434,6 +450,130 @@ function renderHistory() {
   }));
 }
 
+function renderDictionary() {
+  dictionaryCount.textContent = `${dictionaryEntries.length} / 100語`;
+  if (!dictionaryEntries.length) {
+    dictionaryList.textContent = '登録した単語はありません。';
+    return;
+  }
+  dictionaryList.replaceChildren(...dictionaryEntries.map((entry) => {
+    const row = document.createElement('div');
+    row.className = 'dictionary-item';
+    const words = document.createElement('div');
+    words.className = 'dictionary-words';
+    const reading = document.createElement('span');
+    reading.textContent = entry.reading;
+    const arrow = document.createElement('span');
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = '→';
+    const replacement = document.createElement('strong');
+    replacement.textContent = entry.replacement;
+    words.append(reading, arrow, replacement);
+
+    const actions = document.createElement('div');
+    actions.className = 'dictionary-item-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'history-refresh';
+    edit.textContent = '編集';
+    edit.addEventListener('click', () => {
+      dictionaryEditingId = entry.id;
+      dictionaryReading.value = entry.reading;
+      dictionaryReplacement.value = entry.replacement;
+      dictionarySubmit.textContent = '変更を保存';
+      dictionaryCancel.hidden = false;
+      dictionaryMessage.textContent = '';
+      dictionaryDetails.open = true;
+      dictionaryReading.focus();
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'history-refresh';
+    remove.textContent = '削除';
+    remove.addEventListener('click', () => void deleteDictionaryEntry(entry));
+    actions.append(edit, remove);
+    row.append(words, actions);
+    return row;
+  }));
+}
+
+function cancelDictionaryEdit() {
+  dictionaryEditingId = null;
+  dictionaryForm?.reset();
+  if (dictionarySubmit) dictionarySubmit.textContent = '登録する';
+  if (dictionaryCancel) dictionaryCancel.hidden = true;
+  if (dictionaryMessage) dictionaryMessage.textContent = '';
+}
+
+async function loadDictionary() {
+  dictionaryList.textContent = '登録語を読み込み中…';
+  try {
+    const response = await fetch('/api/dictionary', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      await requireLogin(data.error);
+      return;
+    }
+    if (!response.ok) throw new Error(data.error || '単語登録を読み込めませんでした。');
+    dictionaryEntries = Array.isArray(data.entries) ? data.entries : [];
+    renderDictionary();
+  } catch (error) {
+    dictionaryList.textContent = error.message || '単語登録を読み込めませんでした。';
+  }
+}
+
+async function saveDictionaryEntry(event) {
+  event.preventDefault();
+  dictionaryMessage.textContent = '';
+  dictionarySubmit.disabled = true;
+  try {
+    const response = await fetch('/api/dictionary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: dictionaryEditingId || undefined,
+        reading: dictionaryReading.value,
+        replacement: dictionaryReplacement.value
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      await requireLogin(data.error);
+      return;
+    }
+    if (!response.ok) throw new Error(data.error || '単語登録を保存できませんでした。');
+    cancelDictionaryEdit();
+    await loadDictionary();
+    setMessage('単語登録を保存しました。次のローマ字変換から反映されます。');
+  } catch (error) {
+    dictionaryMessage.textContent = error.message || '単語登録を保存できませんでした。';
+  } finally {
+    dictionarySubmit.disabled = false;
+  }
+}
+
+async function deleteDictionaryEntry(entry) {
+  if (!window.confirm(`「${entry.reading} → ${entry.replacement}」を削除しますか？`)) return;
+  try {
+    const response = await fetch('/api/dictionary', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: entry.id })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      await requireLogin(data.error);
+      return;
+    }
+    if (!response.ok) throw new Error(data.error || '単語登録を削除できませんでした。');
+    if (dictionaryEditingId === entry.id) cancelDictionaryEdit();
+    await loadDictionary();
+    setMessage('単語登録を削除しました。');
+  } catch (error) {
+    dictionaryMessage.textContent = error.message || '単語登録を削除できませんでした。';
+  }
+}
+
 async function loadHistory() {
   if (!historyList) return;
   historyList.textContent = '履歴を読み込み中…';
@@ -556,6 +696,8 @@ clearButton.addEventListener('click', clearAll);
 modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode === 'japanese' ? 'japanese' : 'romaji')));
 heightButtons.forEach((button) => button.addEventListener('click', () => setDisplayHeight(button.dataset.height, true)));
 refreshHistoryButton?.addEventListener('click', () => void loadHistory());
+dictionaryForm?.addEventListener('submit', (event) => void saveDictionaryEntry(event));
+dictionaryCancel?.addEventListener('click', cancelDictionaryEdit);
 logoutButton?.addEventListener('click', () => void logout());
 sourceText.addEventListener('input', () => {
   rebuildDocument();

@@ -105,6 +105,25 @@
         </div>
       </section>
 
+      <section class="dictionary-panel" id="dictionaryPanel" aria-label="自分専用の単語登録" hidden>
+        <details id="dictionaryDetails">
+          <summary>自分専用の単語登録 <span id="dictionaryCount" class="dictionary-count"></span></summary>
+          <p class="dictionary-description">ローマ字の読みと変換後の表記を登録できます。登録内容はこのGoogleアカウントだけに保存され、ローマ字変換で使われます。</p>
+          <form id="dictionaryForm" class="dictionary-form">
+            <label for="dictionaryReading">読み（ローマ字）</label>
+            <input id="dictionaryReading" name="reading" type="text" maxlength="80" autocomplete="off" placeholder="例: kosuke" required />
+            <label for="dictionaryReplacement">変換後の表記</label>
+            <input id="dictionaryReplacement" name="replacement" type="text" maxlength="120" autocomplete="off" placeholder="例: 康介" required />
+            <div class="dictionary-form-actions">
+              <button id="dictionarySubmit" class="history-restore" type="submit">登録する</button>
+              <button id="dictionaryCancel" class="history-refresh" type="button" hidden>編集をやめる</button>
+            </div>
+            <p id="dictionaryMessage" class="dictionary-message" role="status" aria-live="polite"></p>
+          </form>
+          <div id="dictionaryList" class="dictionary-list" aria-live="polite">登録語を読み込み中…</div>
+        </details>
+      </section>
+
       <section class="history-panel" id="historyPanel" aria-label="変換履歴" hidden>
         <div class="history-header">
           <div>

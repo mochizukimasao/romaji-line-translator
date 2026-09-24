@@ -21,10 +21,16 @@ export async function onRequestPost(context) {
   if (!validation.ok) return json({ error: validation.error }, validation.status);
   if (!env.GEMINI_API_KEY) return json({ error: '変換サービスの設定がありません。' }, 500);
   try {
+    const dictionary = validation.mode === 'romaji' && env.HISTORY_DB
+      ? (await env.HISTORY_DB.prepare(
+        'SELECT reading, replacement FROM user_dictionary WHERE user_sub = ? ORDER BY reading COLLATE NOCASE LIMIT 100'
+      ).bind(auth.sub).all()).results || []
+      : [];
     const results = await translateItems(validation.items, {
       apiKey: env.GEMINI_API_KEY,
       model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
-      mode: validation.mode
+      mode: validation.mode,
+      dictionary
     });
     return json({ results });
   } catch {

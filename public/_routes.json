@@ -4,6 +4,7 @@
   "include": [
     "/api/translate",
     "/api/history",
+    "/api/dictionary",
     "/api/auth/session",
     "/api/auth/config"
   ],

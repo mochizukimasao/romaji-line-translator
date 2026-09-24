@@ -265,34 +265,116 @@ function onRequestDelete({ request }) {
 }
 __name(onRequestDelete, "onRequestDelete");
 
-// api/history.js
-var HISTORY_LIMIT = 10;
-var MAX_TEXT_LENGTH = 12e4;
+// api/dictionary.js
+var ENTRY_LIMIT = 100;
+var MAX_READING_LENGTH = 80;
+var MAX_REPLACEMENT_LENGTH = 120;
 function json2(body, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 }
 __name(json2, "json");
+function normalizeReading(value) {
+  return value.trim().toLocaleLowerCase("en-US").replace(/\s+/gu, " ");
+}
+__name(normalizeReading, "normalizeReading");
 async function onRequestGet3({ request, env }) {
   const auth = await getAuthorizedIdentity(request, env);
   if (!auth.ok) return json2({ error: auth.error }, auth.status);
-  if (!env.HISTORY_DB) return json2({ error: "\u5C65\u6B74\u4FDD\u5B58\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  if (!env.HISTORY_DB) return json2({ error: "\u5358\u8A9E\u767B\u9332\u306E\u4FDD\u5B58\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
   const { results } = await env.HISTORY_DB.prepare(
-    "SELECT id, mode, source, result, created_at AS createdAt FROM history WHERE user_email = ? AND user_sub = ? ORDER BY created_at DESC, rowid DESC LIMIT ?"
-  ).bind(auth.email, auth.sub, HISTORY_LIMIT).all();
-  return json2({ history: results || [] });
+    "SELECT id, reading, replacement, created_at AS createdAt FROM user_dictionary WHERE user_sub = ? ORDER BY reading COLLATE NOCASE, rowid LIMIT ?"
+  ).bind(auth.sub, ENTRY_LIMIT).all();
+  return json2({ entries: results || [], limit: ENTRY_LIMIT });
 }
 __name(onRequestGet3, "onRequestGet");
 async function onRequestPost2({ request, env }) {
   if (!isSameOriginPost(request)) return json2({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
   const auth = await getAuthorizedIdentity(request, env);
   if (!auth.ok) return json2({ error: auth.error }, auth.status);
-  if (!env.HISTORY_DB) return json2({ error: "\u5C65\u6B74\u4FDD\u5B58\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  if (!env.HISTORY_DB) return json2({ error: "\u5358\u8A9E\u767B\u9332\u306E\u4FDD\u5B58\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
   if (!hasJsonContentType(request)) return json2({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
-  const parsed = await readJsonLimited(request);
+  const parsed = await readJsonLimited(request, 24e3);
   if (parsed.tooLarge) return json2({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
-  if (!parsed.ok) return json2({ error: "JSON\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  if (!parsed.ok) return json2({ error: "\u5358\u8A9E\u767B\u9332\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  const { id, reading, replacement } = parsed.value || {};
+  if (id !== void 0 && (typeof id !== "string" || !id.trim() || id.length > 80) || typeof reading !== "string" || !reading.trim() || reading.length > MAX_READING_LENGTH || typeof replacement !== "string" || !replacement.trim() || replacement.length > MAX_REPLACEMENT_LENGTH) return json2({ error: "\u8AAD\u307F\u3068\u5909\u63DB\u5F8C\u306E\u8868\u8A18\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\uFF08\u8AAD\u307F80\u6587\u5B57\u3001\u8868\u8A18120\u6587\u5B57\u307E\u3067\uFF09\u3002" }, 400);
+  const normalizedReading = normalizeReading(reading);
+  const existing = id ? await env.HISTORY_DB.prepare("SELECT id FROM user_dictionary WHERE id = ? AND user_sub = ?").bind(id, auth.sub).first() : await env.HISTORY_DB.prepare("SELECT id FROM user_dictionary WHERE user_sub = ? AND normalized_reading = ?").bind(auth.sub, normalizedReading).first();
+  if (id && !existing) return json2({ error: "\u7DE8\u96C6\u3059\u308B\u767B\u9332\u8A9E\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002" }, 404);
+  if (!id && existing) return json2({ error: "\u540C\u3058\u8AAD\u307F\u304C\u3059\u3067\u306B\u767B\u9332\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u65E2\u5B58\u306E\u767B\u9332\u3092\u7DE8\u96C6\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 409);
+  if (!id) {
+    const total = await env.HISTORY_DB.prepare(
+      "SELECT COUNT(*) AS count FROM user_dictionary WHERE user_sub = ?"
+    ).bind(auth.sub).first();
+    if (Number(total?.count || 0) >= ENTRY_LIMIT) {
+      return json2({ error: `\u767B\u9332\u3067\u304D\u308B\u306E\u306F${ENTRY_LIMIT}\u8A9E\u307E\u3067\u3067\u3059\u3002\u4E0D\u8981\u306A\u767B\u9332\u3092\u524A\u9664\u3057\u3066\u304F\u3060\u3055\u3044\u3002` }, 409);
+    }
+  }
+  const entryId = id || crypto.randomUUID();
+  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    if (id) {
+      await env.HISTORY_DB.prepare(
+        "UPDATE user_dictionary SET reading = ?, normalized_reading = ?, replacement = ?, created_at = ? WHERE id = ? AND user_sub = ?"
+      ).bind(reading.trim(), normalizedReading, replacement.trim(), createdAt, entryId, auth.sub).run();
+    } else {
+      await env.HISTORY_DB.prepare(
+        "INSERT INTO user_dictionary (id, user_email, user_sub, reading, normalized_reading, replacement, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(entryId, auth.email, auth.sub, reading.trim(), normalizedReading, replacement.trim(), createdAt).run();
+    }
+  } catch {
+    return json2({ error: "\u540C\u3058\u8AAD\u307F\u304C\u767B\u9332\u6E08\u307F\u304B\u3001\u4FDD\u5B58\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u767B\u9332\u4E00\u89A7\u3092\u66F4\u65B0\u3057\u3066\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 409);
+  }
+  return json2({ entry: { id: entryId, reading: reading.trim(), replacement: replacement.trim(), createdAt } }, id ? 200 : 201);
+}
+__name(onRequestPost2, "onRequestPost");
+async function onRequestDelete2({ request, env }) {
+  if (!isSameOriginPost(request)) return json2({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  const auth = await getAuthorizedIdentity(request, env);
+  if (!auth.ok) return json2({ error: auth.error }, auth.status);
+  if (!env.HISTORY_DB) return json2({ error: "\u5358\u8A9E\u767B\u9332\u306E\u4FDD\u5B58\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  if (!hasJsonContentType(request)) return json2({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
+  const parsed = await readJsonLimited(request, 24e3);
+  if (parsed.tooLarge) return json2({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
+  if (!parsed.ok) return json2({ error: "\u524A\u9664\u5BFE\u8C61\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  const id = parsed.value?.id;
+  if (typeof id !== "string" || !id.trim() || id.length > 80) return json2({ error: "\u524A\u9664\u3059\u308B\u767B\u9332\u8A9E\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 400);
+  const result = await env.HISTORY_DB.prepare(
+    "DELETE FROM user_dictionary WHERE id = ? AND user_sub = ?"
+  ).bind(id, auth.sub).run();
+  if (!result.meta?.changes) return json2({ error: "\u524A\u9664\u3059\u308B\u767B\u9332\u8A9E\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002" }, 404);
+  return json2({ deleted: true });
+}
+__name(onRequestDelete2, "onRequestDelete");
+
+// api/history.js
+var HISTORY_LIMIT = 10;
+var MAX_TEXT_LENGTH = 12e4;
+function json3(body, status = 200) {
+  return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
+}
+__name(json3, "json");
+async function onRequestGet4({ request, env }) {
+  const auth = await getAuthorizedIdentity(request, env);
+  if (!auth.ok) return json3({ error: auth.error }, auth.status);
+  if (!env.HISTORY_DB) return json3({ error: "\u5C65\u6B74\u4FDD\u5B58\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  const { results } = await env.HISTORY_DB.prepare(
+    "SELECT id, mode, source, result, created_at AS createdAt FROM history WHERE user_email = ? AND user_sub = ? ORDER BY created_at DESC, rowid DESC LIMIT ?"
+  ).bind(auth.email, auth.sub, HISTORY_LIMIT).all();
+  return json3({ history: results || [] });
+}
+__name(onRequestGet4, "onRequestGet");
+async function onRequestPost3({ request, env }) {
+  if (!isSameOriginPost(request)) return json3({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  const auth = await getAuthorizedIdentity(request, env);
+  if (!auth.ok) return json3({ error: auth.error }, auth.status);
+  if (!env.HISTORY_DB) return json3({ error: "\u5C65\u6B74\u4FDD\u5B58\u306E\u8A2D\u5B9A\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093\u3002" }, 503);
+  if (!hasJsonContentType(request)) return json3({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
+  const parsed = await readJsonLimited(request);
+  if (parsed.tooLarge) return json3({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
+  if (!parsed.ok) return json3({ error: "JSON\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
   const { mode, source, result } = parsed.value || {};
-  if (!["romaji", "japanese"].includes(mode) || typeof source !== "string" || !source.trim() || source.length > MAX_TEXT_LENGTH || typeof result !== "string" || !result.trim() || result.length > MAX_TEXT_LENGTH) return json2({ error: "\u5C65\u6B74\u306E\u5185\u5BB9\u304C\u4E0D\u6B63\u304B\u3001\u9577\u3059\u304E\u307E\u3059\u3002" }, 400);
+  if (!["romaji", "japanese"].includes(mode) || typeof source !== "string" || !source.trim() || source.length > MAX_TEXT_LENGTH || typeof result !== "string" || !result.trim() || result.length > MAX_TEXT_LENGTH) return json3({ error: "\u5C65\u6B74\u306E\u5185\u5BB9\u304C\u4E0D\u6B63\u304B\u3001\u9577\u3059\u304E\u307E\u3059\u3002" }, 400);
   const id = crypto.randomUUID();
   const createdAt = (/* @__PURE__ */ new Date()).toISOString();
   await env.HISTORY_DB.batch([
@@ -306,9 +388,9 @@ async function onRequestPost2({ request, env }) {
   const { results } = await env.HISTORY_DB.prepare(
     "SELECT id, mode, source, result, created_at AS createdAt FROM history WHERE user_email = ? AND user_sub = ? ORDER BY created_at DESC, rowid DESC LIMIT ?"
   ).bind(auth.email, auth.sub, HISTORY_LIMIT).all();
-  return json2({ history: results || [] }, 201);
+  return json3({ history: results || [] }, 201);
 }
-__name(onRequestPost2, "onRequestPost");
+__name(onRequestPost3, "onRequestPost");
 
 // ../src/lib/gemini.js
 var GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -344,11 +426,24 @@ var PRODUCT_ALIASES = /* @__PURE__ */ new Map([
   ["ChatGPT", ["ChatGPT", "\u30C1\u30E3\u30C3\u30C8\u30B8\u30FC\u30D4\u30FC\u30C6\u30A3\u30FC"]]
 ]);
 var JAPANESE_RUN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]+/gu;
-function buildTranslatePrompt(mode, items) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+__name(escapeRegExp, "escapeRegExp");
+function sourceContainsReading(source, reading) {
+  const parts = String(reading || "").trim().split(/\s+/u).filter(Boolean);
+  if (!parts.length) return false;
+  const pattern = parts.map(escapeRegExp).join("\\s+");
+  return new RegExp(`(^|[^A-Za-z])${pattern}(?=$|[^A-Za-z])`, "i").test(source);
+}
+__name(sourceContainsReading, "sourceContainsReading");
+function buildTranslatePrompt(mode, items, dictionary = []) {
   const goal = mode === "japanese" ? "\u65E5\u672C\u8A9E\u306E\u610F\u5473\u3001\u767A\u8A00\u5185\u5BB9\u3001\u56FA\u6709\u540D\u8A5E\u3001\u6570\u5B57\u3001\u8A9E\u8ABF\u3092\u4FDD\u3063\u305F\u307E\u307E\u3001\u52A9\u8A5E\u30FB\u53E5\u8AAD\u70B9\u30FB\u660E\u767D\u306A\u8A9E\u9806\u306E\u5D29\u308C\u3060\u3051\u3092\u6700\u5C0F\u9650\u4FEE\u6B63\u3059\u308B\u3002" : "\u30ED\u30FC\u30DE\u5B57\u3092\u6587\u8108\u306B\u5FDC\u3058\u305F\u81EA\u7136\u306A\u6F22\u5B57\u304B\u306A\u4EA4\u3058\u308A\u6587\u3078\u5909\u63DB\u3057\u3001\u610F\u5473\u3001\u8A9E\u9806\u3001\u8A9E\u8ABF\u3001\u4E01\u5BE7\u3055\u3001\u65AD\u5B9A\u306E\u5F37\u3055\u3092\u5909\u3048\u306A\u3044\u3002";
+  const relevantDictionary = mode === "romaji" ? dictionary.filter((entry) => items.some((item) => sourceContainsReading(item.text, entry.reading))).map(({ reading, replacement }) => ({ reading, replacement })) : [];
   return [
     "\u3042\u306A\u305F\u306F\u6B63\u78BA\u306A\u65E5\u672C\u8A9E\u5909\u63DB\u30A8\u30C7\u30A3\u30BF\u3067\u3059\u3002",
     `\u76EE\u7684: ${goal}`,
+    relevantDictionary.length ? `\u5229\u7528\u8005\u304C\u767B\u9332\u3057\u305F\u5358\u8A9E\u8F9E\u66F8\u3092\u6700\u512A\u5148\u3067\u9069\u7528\u3059\u308B\u3002\u5165\u529B\u306B\u767B\u9332\u8AAD\u307F\u304C\u5358\u8A9E\u3068\u3057\u3066\u73FE\u308C\u305F\u3089\u3001\u5BFE\u5FDC\u3059\u308B\u5909\u63DB\u5F8C\u8868\u8A18\u3092\u305D\u306E\u307E\u307E\u4F7F\u3044\u3001\u5225\u306E\u6F22\u5B57\u3084\u8868\u8A18\u306B\u7F6E\u304D\u63DB\u3048\u306A\u3044\u3002\u8F9E\u66F8: ${JSON.stringify(relevantDictionary)}` : "",
     "\u8981\u7D04\u3001\u8AAC\u660E\u3001\u60C5\u5831\u8FFD\u52A0\u3001\u8A55\u4FA1\u3001\u88C5\u98FE\u7684\u306A\u8A00\u3044\u63DB\u3048\u3092\u3057\u306A\u3044\u3002\u5165\u529B\u306E\u9806\u5E8F\u3068\u9805\u76EE\u6570\u3092\u5FC5\u305A\u4FDD\u3064\u3002",
     "URL\u3001\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9\u3001@mention\u3001#hashtag\u3001\u6570\u5B57\u3001\u65E5\u6642\u3001\u5143\u5165\u529B\u306E\u65E5\u672C\u8A9E\u3001LINE\u30FBZoom\u30FBGoogle\u30FBChatGPT\u306A\u3069\u306E\u88FD\u54C1\u540D\u30FB\u7565\u8A9E\u3001\u4EBA\u540D\u30FB\u5730\u540D\u30FB\u7D44\u7E54\u540D\u306F\u52DD\u624B\u306B\u5225\u8A9E\u3078\u7F6E\u63DB\u3057\u306A\u3044\u3002",
     "\u51FA\u529B\u306BLatin\u6587\u5B57\u3092\u6B8B\u3059\u5834\u5408\u306F\u3001\u5143\u5165\u529B\u306B\u3042\u308B\u4FDD\u8B77\u5BFE\u8C61\u30C8\u30FC\u30AF\u30F3\u3068\u5B8C\u5168\u4E00\u81F4\u3059\u308B\u3082\u306E\u3060\u3051\u8A31\u53EF\u3059\u308B\u3002",
@@ -384,7 +479,7 @@ function parseResponse(text) {
   return results.map((item) => typeof item === "string" ? { output: item } : item);
 }
 __name(parseResponse, "parseResponse");
-function validateOutput(mode, source, output) {
+function validateOutput(mode, source, output, dictionary = []) {
   const value = safeString(output).trimEnd();
   if (!value.trim()) return false;
   if (mode === "japanese" && value.replace(/\s/g, "").length < source.replace(/\s/g, "").length * 0.35) return false;
@@ -397,19 +492,24 @@ function validateOutput(mode, source, output) {
   }
   const protectedTokens = source.match(PROTECTED_TOKEN) || [];
   let remaining = value;
+  const matchingDictionary = mode === "romaji" ? dictionary.filter((entry) => sourceContainsReading(source, entry.reading)) : [];
+  for (const entry of matchingDictionary) {
+    if (!value.includes(entry.replacement)) return false;
+    remaining = remaining.replace(entry.replacement, "");
+  }
   for (const token of protectedTokens) {
     const alternatives = PRODUCT_ALIASES.get(token) || [token];
     const matched = alternatives.find((candidate) => remaining.includes(candidate));
     if (!matched) return false;
     remaining = remaining.replace(matched, "");
   }
-  if (mode === "romaji" && /[A-Za-z]/.test(value)) {
-    if (/[A-Za-z]/.test(remaining)) return false;
+  if (mode === "romaji") {
+    if (/[A-Za-z]/.test(value) && /[A-Za-z]/.test(remaining)) return false;
   }
   return mode === "japanese" || /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(value) || protectedTokens.length > 0;
 }
 __name(validateOutput, "validateOutput");
-async function requestBatch(items, { apiKey, model, mode }) {
+async function requestBatch(items, { apiKey, model, mode, dictionary = [] }) {
   if (!apiKey) throw createError("configuration");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -420,7 +520,7 @@ async function requestBatch(items, { apiKey, model, mode }) {
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: buildTranslatePrompt(mode, items) }] }],
+        contents: [{ role: "user", parts: [{ text: buildTranslatePrompt(mode, items, dictionary) }] }],
         generationConfig: {
           temperature: 0,
           maxOutputTokens: 4096,
@@ -450,7 +550,8 @@ async function requestBatch(items, { apiKey, model, mode }) {
   const byId = new Map(results.map((result) => [result.id, result]));
   return items.map((item) => {
     const result = byId.get(item.id);
-    if (!result || !validateOutput(mode, item.text, result.output)) throw new Error("validation");
+    const relevantDictionary = mode === "romaji" ? dictionary.filter((entry) => sourceContainsReading(item.text, entry.reading)) : [];
+    if (!result || !validateOutput(mode, item.text, result.output, relevantDictionary)) throw new Error("validation");
     return { id: item.id, status: "ok", output: safeString(result.output).trimEnd(), errorCode: null };
   });
 }
@@ -493,17 +594,17 @@ function errorCode(error) {
   return ["configuration", "service", "transient_service", "rate_limit", "timeout", "invalid_json", "count_mismatch", "validation"].includes(code) ? code : "service";
 }
 __name(errorCode, "errorCode");
-async function translateItems(items, { apiKey, model = DEFAULT_GEMINI_MODEL, mode = "romaji" } = {}) {
+async function translateItems(items, { apiKey, model = DEFAULT_GEMINI_MODEL, mode = "romaji", dictionary = [] } = {}) {
   const results = [];
   for (let index = 0; index < items.length; index += BATCH_SIZE) {
     const chunk = items.slice(index, index + BATCH_SIZE);
     try {
-      results.push(...await requestBatchWithRetry(chunk, { apiKey, model, mode }));
+      results.push(...await requestBatchWithRetry(chunk, { apiKey, model, mode, dictionary }));
     } catch (batchError) {
       if (isRetryableError(batchError)) {
         results.push(...chunk.map((item) => ({ id: item.id, status: "error", output: "", errorCode: errorCode(batchError) })));
       } else {
-        results.push(...await translateIsolatedItems(chunk, { apiKey, model, mode }, batchError));
+        results.push(...await translateIsolatedItems(chunk, { apiKey, model, mode, dictionary }, batchError));
       }
     }
   }
@@ -548,37 +649,41 @@ function validateTranslateRequest(body) {
 __name(validateTranslateRequest, "validateTranslateRequest");
 
 // api/translate.js
-function json3(body, status = 200) {
+function json4(body, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 }
-__name(json3, "json");
-async function onRequestPost3(context) {
+__name(json4, "json");
+async function onRequestPost4(context) {
   const { request, env } = context;
-  if (!isSameOriginPost(request)) return json3({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
+  if (!isSameOriginPost(request)) return json4({ error: "\u4E0D\u6B63\u306A\u30EA\u30AF\u30A8\u30B9\u30C8\u5143\u3067\u3059\u3002" }, 403);
   const auth = await getAuthorizedIdentity(request, env);
-  if (!auth.ok) return json3({ error: auth.error }, auth.status);
-  if (!hasJsonContentType(request)) return json3({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
+  if (!auth.ok) return json4({ error: auth.error }, auth.status);
+  if (!hasJsonContentType(request)) return json4({ error: "JSON\u5F62\u5F0F\u3067\u9001\u4FE1\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }, 415);
   const parsed = await readJsonLimited(request);
-  if (parsed.tooLarge) return json3({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
-  if (!parsed.ok) return json3({ error: "JSON\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
+  if (parsed.tooLarge) return json4({ error: "\u30EA\u30AF\u30A8\u30B9\u30C8\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002" }, 413);
+  if (!parsed.ok) return json4({ error: "JSON\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002" }, 400);
   const body = parsed.value;
   const validation = validateTranslateRequest(body);
-  if (!validation.ok) return json3({ error: validation.error }, validation.status);
-  if (!env.GEMINI_API_KEY) return json3({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u306E\u8A2D\u5B9A\u304C\u3042\u308A\u307E\u305B\u3093\u3002" }, 500);
+  if (!validation.ok) return json4({ error: validation.error }, validation.status);
+  if (!env.GEMINI_API_KEY) return json4({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u306E\u8A2D\u5B9A\u304C\u3042\u308A\u307E\u305B\u3093\u3002" }, 500);
   try {
+    const dictionary = validation.mode === "romaji" && env.HISTORY_DB ? (await env.HISTORY_DB.prepare(
+      "SELECT reading, replacement FROM user_dictionary WHERE user_sub = ? ORDER BY reading COLLATE NOCASE LIMIT 100"
+    ).bind(auth.sub).all()).results || [] : [];
     const results = await translateItems(validation.items, {
       apiKey: env.GEMINI_API_KEY,
       model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
-      mode: validation.mode
+      mode: validation.mode,
+      dictionary
     });
-    return json3({ results });
+    return json4({ results });
   } catch {
-    return json3({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u3092\u5229\u7528\u3067\u304D\u307E\u305B\u3093\u3002" }, 503);
+    return json4({ error: "\u5909\u63DB\u30B5\u30FC\u30D3\u30B9\u3092\u5229\u7528\u3067\u304D\u307E\u305B\u3093\u3002" }, 503);
   }
 }
-__name(onRequestPost3, "onRequestPost");
+__name(onRequestPost4, "onRequestPost");
 
-// ../.wrangler/tmp/pages-05St13/functionsRoutes-0.3990662004882125.mjs
+// ../.wrangler/tmp/pages-yo5co8/functionsRoutes-0.13579906931645547.mjs
 var routes = [
   {
     routePath: "/api/auth/config",
@@ -609,25 +714,46 @@ var routes = [
     modules: [onRequestPost]
   },
   {
-    routePath: "/api/history",
+    routePath: "/api/dictionary",
+    mountPath: "/api",
+    method: "DELETE",
+    middlewares: [],
+    modules: [onRequestDelete2]
+  },
+  {
+    routePath: "/api/dictionary",
     mountPath: "/api",
     method: "GET",
     middlewares: [],
     modules: [onRequestGet3]
   },
   {
-    routePath: "/api/history",
+    routePath: "/api/dictionary",
     mountPath: "/api",
     method: "POST",
     middlewares: [],
     modules: [onRequestPost2]
   },
   {
-    routePath: "/api/translate",
+    routePath: "/api/history",
+    mountPath: "/api",
+    method: "GET",
+    middlewares: [],
+    modules: [onRequestGet4]
+  },
+  {
+    routePath: "/api/history",
     mountPath: "/api",
     method: "POST",
     middlewares: [],
     modules: [onRequestPost3]
+  },
+  {
+    routePath: "/api/translate",
+    mountPath: "/api",
+    method: "POST",
+    middlewares: [],
+    modules: [onRequestPost4]
   }
 ];
 

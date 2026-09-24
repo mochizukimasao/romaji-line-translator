@@ -34,13 +34,31 @@ const PRODUCT_ALIASES = new Map([
 ]);
 const JAPANESE_RUN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]+/gu;
 
-export function buildTranslatePrompt(mode, items) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sourceContainsReading(source, reading) {
+  const parts = String(reading || '').trim().split(/\s+/u).filter(Boolean);
+  if (!parts.length) return false;
+  const pattern = parts.map(escapeRegExp).join('\\s+');
+  return new RegExp(`(^|[^A-Za-z])${pattern}(?=$|[^A-Za-z])`, 'i').test(source);
+}
+
+export function buildTranslatePrompt(mode, items, dictionary = []) {
   const goal = mode === 'japanese'
     ? '日本語の意味、発言内容、固有名詞、数字、語調を保ったまま、助詞・句読点・明白な語順の崩れだけを最小限修正する。'
     : 'ローマ字を文脈に応じた自然な漢字かな交じり文へ変換し、意味、語順、語調、丁寧さ、断定の強さを変えない。';
+  const relevantDictionary = mode === 'romaji'
+    ? dictionary.filter((entry) => items.some((item) => sourceContainsReading(item.text, entry.reading)))
+      .map(({ reading, replacement }) => ({ reading, replacement }))
+    : [];
   return [
     'あなたは正確な日本語変換エディタです。',
     `目的: ${goal}`,
+    relevantDictionary.length
+      ? `利用者が登録した単語辞書を最優先で適用する。入力に登録読みが単語として現れたら、対応する変換後表記をそのまま使い、別の漢字や表記に置き換えない。辞書: ${JSON.stringify(relevantDictionary)}`
+      : '',
     '要約、説明、情報追加、評価、装飾的な言い換えをしない。入力の順序と項目数を必ず保つ。',
     'URL、メールアドレス、@mention、#hashtag、数字、日時、元入力の日本語、LINE・Zoom・Google・ChatGPTなどの製品名・略語、人名・地名・組織名は勝手に別語へ置換しない。',
     '出力にLatin文字を残す場合は、元入力にある保護対象トークンと完全一致するものだけ許可する。',
@@ -74,7 +92,7 @@ export function parseResponse(text) {
   return results.map((item) => typeof item === 'string' ? { output: item } : item);
 }
 
-export function validateOutput(mode, source, output) {
+export function validateOutput(mode, source, output, dictionary = []) {
   const value = safeString(output).trimEnd();
   if (!value.trim()) return false;
   if (mode === 'japanese' && value.replace(/\s/g, '').length < source.replace(/\s/g, '').length * 0.35) return false;
@@ -87,21 +105,28 @@ export function validateOutput(mode, source, output) {
   }
   const protectedTokens = source.match(PROTECTED_TOKEN) || [];
   let remaining = value;
+  const matchingDictionary = mode === 'romaji'
+    ? dictionary.filter((entry) => sourceContainsReading(source, entry.reading))
+    : [];
+  for (const entry of matchingDictionary) {
+    if (!value.includes(entry.replacement)) return false;
+    remaining = remaining.replace(entry.replacement, '');
+  }
   for (const token of protectedTokens) {
     const alternatives = PRODUCT_ALIASES.get(token) || [token];
     const matched = alternatives.find((candidate) => remaining.includes(candidate));
     if (!matched) return false;
     remaining = remaining.replace(matched, '');
   }
-  if (mode === 'romaji' && /[A-Za-z]/.test(value)) {
-    if (/[A-Za-z]/.test(remaining)) return false;
+  if (mode === 'romaji') {
+    if (/[A-Za-z]/.test(value) && /[A-Za-z]/.test(remaining)) return false;
   }
   return mode === 'japanese' ||
     /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(value) ||
     protectedTokens.length > 0;
 }
 
-async function requestBatch(items, { apiKey, model, mode }) {
+async function requestBatch(items, { apiKey, model, mode, dictionary = [] }) {
   if (!apiKey) throw createError('configuration');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -112,7 +137,7 @@ async function requestBatch(items, { apiKey, model, mode }) {
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: buildTranslatePrompt(mode, items) }] }],
+        contents: [{ role: 'user', parts: [{ text: buildTranslatePrompt(mode, items, dictionary) }] }],
         generationConfig: {
           temperature: 0,
           maxOutputTokens: 4096,
@@ -140,7 +165,10 @@ async function requestBatch(items, { apiKey, model, mode }) {
   const byId = new Map(results.map((result) => [result.id, result]));
   return items.map((item) => {
     const result = byId.get(item.id);
-    if (!result || !validateOutput(mode, item.text, result.output)) throw new Error('validation');
+    const relevantDictionary = mode === 'romaji'
+      ? dictionary.filter((entry) => sourceContainsReading(item.text, entry.reading))
+      : [];
+    if (!result || !validateOutput(mode, item.text, result.output, relevantDictionary)) throw new Error('validation');
     return { id: item.id, status: 'ok', output: safeString(result.output).trimEnd(), errorCode: null };
   });
 }
@@ -183,17 +211,17 @@ function errorCode(error) {
   return ['configuration', 'service', 'transient_service', 'rate_limit', 'timeout', 'invalid_json', 'count_mismatch', 'validation'].includes(code) ? code : 'service';
 }
 
-export async function translateItems(items, { apiKey, model = DEFAULT_GEMINI_MODEL, mode = 'romaji' } = {}) {
+export async function translateItems(items, { apiKey, model = DEFAULT_GEMINI_MODEL, mode = 'romaji', dictionary = [] } = {}) {
   const results = [];
   for (let index = 0; index < items.length; index += BATCH_SIZE) {
     const chunk = items.slice(index, index + BATCH_SIZE);
     try {
-      results.push(...await requestBatchWithRetry(chunk, { apiKey, model, mode }));
+      results.push(...await requestBatchWithRetry(chunk, { apiKey, model, mode, dictionary }));
     } catch (batchError) {
       if (isRetryableError(batchError)) {
         results.push(...chunk.map((item) => ({ id: item.id, status: 'error', output: '', errorCode: errorCode(batchError) })));
       } else {
-        results.push(...await translateIsolatedItems(chunk, { apiKey, model, mode }, batchError));
+        results.push(...await translateIsolatedItems(chunk, { apiKey, model, mode, dictionary }, batchError));
       }
     }
   }
