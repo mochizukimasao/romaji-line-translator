@@ -1,5 +1,6 @@
-import { DEFAULT_GEMINI_MODEL, translateItems } from '../../src/lib/gemini.js';
 import { validateTranslateRequest } from '../../src/lib/api-request.js';
+import { convertRomajiLocally, formatJapaneseLocally } from '../../src/lib/local-convert.js';
+import { translateWithWorkersAI } from '../../src/lib/workers-ai.js';
 import { getAuthorizedIdentity, isSameOriginPost } from '../lib/google-auth.js';
 import { hasJsonContentType, readJsonLimited } from '../lib/read-json-limited.js';
 
@@ -19,19 +20,22 @@ export async function onRequestPost(context) {
   const body = parsed.value;
   const validation = validateTranslateRequest(body);
   if (!validation.ok) return json({ error: validation.error }, validation.status);
-  if (!env.GEMINI_API_KEY) return json({ error: '変換サービスの設定がありません。' }, 500);
   try {
     const dictionary = validation.mode === 'romaji' && env.HISTORY_DB
       ? (await env.HISTORY_DB.prepare(
         'SELECT reading, replacement FROM user_dictionary WHERE user_sub = ? ORDER BY reading COLLATE NOCASE LIMIT 100'
       ).bind(auth.sub).all()).results || []
       : [];
-    const results = await translateItems(validation.items, {
-      apiKey: env.GEMINI_API_KEY,
-      model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
-      mode: validation.mode,
-      dictionary
-    });
+    const results = env.AI
+      ? await translateWithWorkersAI(env.AI, validation.items, { mode: validation.mode, dictionary })
+      : validation.items.map((item) => ({
+        id: item.id,
+        status: 'ok',
+        output: validation.mode === 'romaji'
+          ? convertRomajiLocally(item.text, dictionary)
+          : formatJapaneseLocally(item.text),
+        errorCode: null
+      }));
     return json({ results });
   } catch {
     return json({ error: '変換サービスを利用できません。' }, 503);

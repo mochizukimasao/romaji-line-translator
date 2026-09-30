@@ -91,14 +91,16 @@ npm run dev
 
 ## Cloudflare Pages
 
-Cloudflare Pages では次の形で載せられます。
+Cloudflare Pages ではWorkers AIを使って翻訳します。Google Gemini APIキーや従量課金のGoogle Cloudプロジェクトは不要です。
 
 1. GitHub にこのリポジトリを push
 2. Cloudflare Pages で GitHub リポジトリを接続
 3. Build command は空、Output directory は `public`
-4. Environment variables に `GEMINI_API_KEY` と必要なら `GEMINI_MODEL` を設定
+4. `wrangler.toml` の `AI` バインディングを本番Pages Functionsへ反映
 
-`functions/api/translate.js` が Pages Functions として動き、`/api/translate` を処理します。
+`functions/api/translate.js` が Pages Functions として動き、`/api/translate` を処理します。Workers AIの既定モデルは `@cf/google/gemma-4-26b-a4b-it` です。AIバインディングが利用できないローカル環境では簡易変換へフォールバックします。
+
+Workers AIの無料枠はアカウント全体で1日10,000 Neuronsです。Freeプランでは上限を超えると停止します。Workers Paidプランでは無料枠超過分が課金されるため、無料運用を保証するにはCloudflareのWorkersプランがFreeであることを確認してください。AI利用量はCloudflareのWorkers AIダッシュボードで確認できます。
 
 ### Googleログインと変換履歴
 
@@ -106,7 +108,7 @@ Cloudflare Pages では次の形で載せられます。
 - Google CloudでOAuthクライアント（ウェブアプリ）を作り、本番サイトのオリジンを「承認済みの JavaScript 生成元」に登録します。ログインはポップアップ方式のため、リダイレクトURIは使いません。
 - Pages Functionsの設定は `wrangler.toml` で管理し、本番環境だけに `HISTORY_DB` を接続します。Pages production secretsに `GOOGLE_CLIENT_ID`（公開可能なOAuthクライアントID）、`GOOGLE_ALLOWED_EMAILS`（許可アドレス一覧）、`GOOGLE_SESSION_SECRET`（32バイト以上のランダムな秘密値）を設定します。`GEMINI_API_KEY`も維持します。秘密値や許可アドレスをコードや公開リポジトリに書きません。
 - FunctionsはGoogle署名鍵・issuer・audience・有効期限・メール検証済み状態を確認し、許可リストと照合します。12時間のHttpOnly/Secure/SameSiteセッションCookieを発行し、失効後は再ログインします。
-- 履歴の所有者は検証済みGoogleのemailとsubで決めます。D1に `migrations/0001_history.sql` を適用し、Pages FunctionsのD1 binding名を `HISTORY_DB` にします。
+- 履歴の所有者は検証済みGoogleのemailとsubで決めます。D1に `migrations/0001_history.sql` と `migrations/0002_user_dictionary.sql` を適用し、Pages FunctionsのD1 binding名を `HISTORY_DB` にします。
 - 成功した変換だけを自動保存し、各Googleアカウントで最新10件を保持します。下書きは保存しません。
 - ActionsはPages FunctionsからAdvanced Mode用の `public/_worker.js` とroutesを生成してからデプロイします。
 
