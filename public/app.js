@@ -49,6 +49,7 @@ const modeMeta = {
   japanese: { hint: '文の区切り: 改行', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
 };
 const statusLabels = { draft: '未確定', pending: '待機中', loading: '変換中', done: '完了', error: '失敗' };
+const errorLabels = { configuration: '設定エラー', service: 'サービスエラー', transient_service: '一時的な通信エラー', rate_limit: '混雑', timeout: '時間切れ', invalid_json: '応答形式エラー', count_mismatch: '結果数エラー', validation: '結果確認エラー', missing_result: '結果なし' };
 let currentMode = 'romaji';
 let requestVersion = 0;
 let requestSerial = 0;
@@ -205,7 +206,8 @@ function render() {
     const lineStatus = line.segments.length ? line.segments.map((item) => getItem(item).status) : ['done'];
     const statusValue = lineStatus.includes('error') ? 'error' : lineStatus.includes('loading') ? 'loading' : lineStatus.includes('draft') ? 'draft' : lineStatus.includes('pending') ? 'pending' : 'done';
     status.className = `row-status ${statusValue}`;
-    status.textContent = line.segments.length ? statusLabels[statusValue] : '空行';
+    const failedItem = line.segments.map((item) => getItem(item)).find((item) => item.status === 'error');
+    status.textContent = failedItem ? errorLabels[failedItem.errorCode] || statusLabels.error : line.segments.length ? statusLabels[statusValue] : '空行';
     row.append(number, text, status);
     for (const item of line.segments) {
       if (getItem(item).status === 'error') {
