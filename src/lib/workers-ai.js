@@ -35,9 +35,12 @@ async function translateBatch(ai, items, mode, dictionary, model) {
       max_tokens: 4096
     });
     const parsed = parseModelResponse(response?.response);
-    const byId = new Map(parsed.map((result) => [result.id, result]));
-    return items.map((item) => {
-      const output = byId.get(item.id)?.output;
+    const byId = new Map(parsed.filter((result) => typeof result.id === 'string').map((result) => [result.id, result]));
+    return items.map((item, index) => {
+      // Some hosted models omit or alter the echoed IDs; the prompt also requires
+      // preserving item order, so use the corresponding position when counts match.
+      const result = byId.get(item.id) || (parsed.length === items.length ? parsed[index] : undefined);
+      const output = result?.output;
       if (!validateOutput(mode, item.text, output, dictionary)) {
         return { id: item.id, status: 'error', output: '', errorCode: 'validation' };
       }
