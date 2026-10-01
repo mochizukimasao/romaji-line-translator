@@ -341,7 +341,18 @@ async function initializeAuth() {
   setAuthenticatedUser(null);
   authMessage.textContent = 'ログイン状態を確認しています…';
   try {
-    const response = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
+    let response;
+    try {
+      response = await fetch('/api/auth/session', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        signal: controller.signal
+      });
+    } finally {
+      window.clearTimeout(timeout);
+    }
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.authenticated && data.user?.email) {
       setAuthenticatedUser(data.user);
@@ -352,7 +363,8 @@ async function initializeAuth() {
     authMessage.textContent = '';
     await initializeGoogleSignIn();
   } catch {
-    authMessage.textContent = 'ログイン状態を確認できませんでした。ページを再読み込みしてください。';
+    authMessage.textContent = 'ログイン状態を確認できませんでした。Googleログインを準備します…';
+    await initializeGoogleSignIn();
   }
 }
 
