@@ -41,6 +41,18 @@ function parseModelResponse(value, depth = 0) {
   throw new Error('invalid_json');
 }
 
+function classifyWorkersAIError(error) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.cause?.status ?? 0);
+  if (status === 408) return 'timeout';
+  if (status === 429) return 'rate_limit';
+  if ([400, 403, 404].includes(status)) return 'configuration';
+  if (status >= 500) return 'transient_service';
+  const message = String(error?.message || '').toLowerCase();
+  if (/daily allocation|quota|neurons/u.test(message)) return 'rate_limit';
+  if (/no such model|invalid model|not allowed|agreement|binding/u.test(message)) return 'configuration';
+  return 'service';
+}
+
 async function translateBatch(ai, items, mode, dictionary, model) {
   try {
     const response = await ai.run(model, {
@@ -61,7 +73,9 @@ async function translateBatch(ai, items, mode, dictionary, model) {
       return { id: item.id, status: 'ok', output: String(output).trimEnd(), errorCode: null };
     });
   } catch (error) {
-    const errorCode = error?.message === 'invalid_json' || error instanceof SyntaxError ? 'invalid_json' : 'service';
+    const errorCode = error?.message === 'invalid_json' || error instanceof SyntaxError
+      ? 'invalid_json'
+      : classifyWorkersAIError(error);
     return items.map((item) => ({ id: item.id, status: 'error', output: '', errorCode }));
   }
 }
