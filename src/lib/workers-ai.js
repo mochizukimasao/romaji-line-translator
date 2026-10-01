@@ -1,6 +1,6 @@
 import { buildTranslatePrompt, validateOutput } from './gemini.js';
 
-export const DEFAULT_WORKERS_AI_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+export const DEFAULT_WORKERS_AI_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 const BATCH_SIZE = 8;
 const BATCH_CHAR_LIMIT = 3000;
@@ -74,7 +74,8 @@ async function translateBatch(ai, items, mode, dictionary, model) {
     let response;
     try {
       response = await ai.run(model, {
-        messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }]
+        messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }],
+        response_format: { type: 'json_object' }
       });
     } catch (error) {
       const status = Number(error?.status ?? error?.statusCode ?? error?.cause?.status ?? 0);
