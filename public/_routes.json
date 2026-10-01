@@ -6,7 +6,8 @@
     "/api/history",
     "/api/dictionary",
     "/api/auth/session",
-    "/api/auth/config"
+    "/api/auth/config",
+    "/api/translate-anonymous"
   ],
   "exclude": []
 }

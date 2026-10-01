@@ -329,7 +329,8 @@ async function logout() {
 }
 
 async function requestTranslation(items, mode) {
-  const response = await fetch('/api/translate', {
+  const endpoint = authenticatedUser ? '/api/translate' : '/api/translate-anonymous';
+  const response = await fetch(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode, items: items.map((item) => ({ id: item.id, text: item.source })) })
   });
@@ -341,7 +342,17 @@ async function requestTranslation(items, mode) {
       errorCode: null, localFallback: true
     }));
   }
-  if (!response.ok) throw new Error(data.error || '変換サービスを利用できません。');
+  if (!response.ok) {
+    if (!authenticatedUser) {
+      return items.map((item) => ({
+        id: item.id, status: 'ok',
+        output: mode === 'romaji' ? convertRomajiLocally(item.source) : formatJapaneseLocally(item.source),
+        errorCode: null, localFallback: true
+      }));
+    }
+    if (response.status === 401) void requireLogin(data.error);
+    throw new Error(data.error || '変換サービスを利用できません。');
+  }
   if (!Array.isArray(data.results)) throw new Error('変換結果を読み取れませんでした。');
   return data.results;
 }
