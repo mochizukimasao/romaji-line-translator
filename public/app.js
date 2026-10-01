@@ -49,7 +49,7 @@ const modeMeta = {
   japanese: { hint: '文の区切り: 改行', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
 };
 const statusLabels = { draft: '未確定', pending: '待機中', loading: '変換中', done: '完了', error: '失敗' };
-const errorLabels = { configuration: 'AI設定エラー', account_access: 'CloudflareのAI利用権限エラー', model_terms: 'AIモデル規約への同意が必要', model_unavailable: 'AIモデルが利用できません', paid_plan_required: '有料プランが必要なモデルです', request_invalid: 'AIへのリクエスト設定エラー', service: 'サービスエラー', transient_service: '一時的な通信エラー', rate_limit: '無料枠上限または混雑', timeout: '時間切れ', invalid_json: '応答形式エラー', count_mismatch: '結果数エラー', validation: '結果確認エラー', missing_result: '結果なし' };
+const errorLabels = { configuration: 'AI設定エラー', account_access: 'CloudflareのAI利用権限エラー', model_terms: 'AIモデル規約への同意が必要', model_unavailable: 'AIモデルが利用できません', paid_plan_required: '有料プランが必要なモデルです', request_invalid: 'AIへのリクエスト設定エラー', ai_binding_error: 'AIバインディングエラー', service: 'サービスエラー', transient_service: '一時的な通信エラー', rate_limit: '無料枠上限または混雑', timeout: '時間切れ', invalid_json: '応答形式エラー', count_mismatch: '結果数エラー', validation: '結果確認エラー', missing_result: '結果なし' };
 let currentMode = 'romaji';
 let requestVersion = 0;
 let requestSerial = 0;
@@ -207,7 +207,7 @@ function render() {
     const statusValue = lineStatus.includes('error') ? 'error' : lineStatus.includes('loading') ? 'loading' : lineStatus.includes('draft') ? 'draft' : lineStatus.includes('pending') ? 'pending' : 'done';
     status.className = `row-status ${statusValue}`;
     const failedItem = line.segments.map((item) => getItem(item)).find((item) => item.status === 'error');
-    status.textContent = failedItem ? errorLabels[failedItem.errorCode] || statusLabels.error : line.segments.length ? statusLabels[statusValue] : '空行';
+    status.textContent = failedItem ? errorLabels[failedItem.errorCode] || (failedItem.errorCode?.startsWith('cloudflare_') ? `Cloudflare AIエラー ${failedItem.errorCode.slice(11)}` : statusLabels.error) : line.segments.length ? statusLabels[statusValue] : '空行';
     row.append(number, text, status);
     for (const item of line.segments) {
       if (getItem(item).status === 'error') {
