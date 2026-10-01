@@ -75,7 +75,23 @@ async function translateBatch(ai, items, mode, dictionary, model) {
     try {
       response = await ai.run(model, {
         messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }],
-        response_format: { type: 'json_object' }
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            type: 'object',
+            properties: {
+              results: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { id: { type: 'string' }, output: { type: 'string' } },
+                  required: ['id', 'output']
+                }
+              }
+            },
+            required: ['results']
+          }
+        }
       });
     } catch (error) {
       const status = Number(error?.status ?? error?.statusCode ?? error?.cause?.status ?? 0);
