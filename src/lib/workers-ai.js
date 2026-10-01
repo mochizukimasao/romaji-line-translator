@@ -43,13 +43,25 @@ function parseModelResponse(value, depth = 0) {
 
 function classifyWorkersAIError(error) {
   const status = Number(error?.status ?? error?.statusCode ?? error?.cause?.status ?? 0);
+  const message = String(error?.message || '');
+  const documentedCode = String(error?.code ?? error?.cause?.code ?? message.match(/\b(?:3003|3006|3007|3008|3023|3036|3040|3041|3042|5007|5016|5018|5035)\b/u)?.[0] ?? '');
+  if (documentedCode === '3036') return 'rate_limit';
+  if (documentedCode === '3040' || documentedCode === '3007' || documentedCode === '3008') return 'transient_service';
+  if (documentedCode === '5016') return 'model_terms';
+  if (documentedCode === '5035') return 'paid_plan_required';
+  if (['3023', '3041', '5018'].includes(documentedCode)) return 'account_access';
+  if (['5007', '3042'].includes(documentedCode)) return 'model_unavailable';
+  if (['3003', '3006'].includes(documentedCode)) return 'request_invalid';
   if (status === 408) return 'timeout';
   if (status === 429) return 'rate_limit';
-  if ([400, 403, 404].includes(status)) return 'configuration';
+  if ([400, 404].includes(status)) return 'model_unavailable';
+  if (status === 403) return 'account_access';
   if (status >= 500) return 'transient_service';
-  const message = String(error?.message || '').toLowerCase();
-  if (/daily allocation|quota|neurons/u.test(message)) return 'rate_limit';
-  if (/no such model|invalid model|not allowed|agreement|binding/u.test(message)) return 'configuration';
+  const normalizedMessage = message.toLowerCase();
+  if (/daily allocation|quota|neurons/u.test(normalizedMessage)) return 'rate_limit';
+  if (/agreement/u.test(normalizedMessage)) return 'model_terms';
+  if (/no such model|invalid model/u.test(normalizedMessage)) return 'model_unavailable';
+  if (/not allowed|binding/u.test(normalizedMessage)) return 'account_access';
   return 'service';
 }
 
