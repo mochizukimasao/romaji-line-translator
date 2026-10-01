@@ -39,7 +39,7 @@ const dictionaryMessage = document.querySelector('#dictionaryMessage');
 const dictionaryList = document.querySelector('#dictionaryList');
 const authGate = document.querySelector('#authGate');
 const authMessage = document.querySelector('#authMessage');
-const googleSignIn = document.querySelector('#googleSignIn');
+const googleLoginButton = document.querySelector('#googleLoginButton');
 const authControls = document.querySelector('#authControls');
 const authAccount = document.querySelector('#authAccount');
 const logoutButton = document.querySelector('#logoutButton');
@@ -70,6 +70,7 @@ let dictionaryEntries = [];
 let dictionaryEditingId = null;
 let authenticatedUser = null;
 let googleSignInInitialized = false;
+let googleTokenClient = null;
 
 function readDisplayHeight() {
   try {
@@ -242,14 +243,19 @@ function loadGoogleIdentityServices() {
   });
 }
 
-async function handleGoogleCredential(response) {
+async function handleGoogleAccessToken(response) {
+  googleLoginButton.disabled = false;
+  if (response.error || !response.access_token) {
+    authMessage.textContent = response.error_description || 'Googleログインを完了できませんでした。';
+    return;
+  }
   authMessage.textContent = 'Googleアカウントを確認しています…';
   try {
     const result = await fetch('/api/auth/session', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credential: response.credential })
+      body: JSON.stringify({ accessToken: response.access_token })
     });
     const data = await result.json().catch(() => ({}));
     if (!result.ok) throw new Error(data.error || 'Googleログインに失敗しました。');
@@ -259,6 +265,21 @@ async function handleGoogleCredential(response) {
     await Promise.all([loadHistory(), loadDictionary()]);
   } catch (error) {
     authMessage.textContent = error.message || 'Googleログインに失敗しました。';
+  }
+}
+
+function beginGoogleLogin() {
+  if (!googleTokenClient) {
+    authMessage.textContent = 'Googleログインを読み込めませんでした。ページを再読み込みしてください。';
+    return;
+  }
+  googleLoginButton.disabled = true;
+  authMessage.textContent = 'Googleログインを開いています…';
+  try {
+    googleTokenClient.requestAccessToken({ prompt: 'select_account' });
+  } catch {
+    googleLoginButton.disabled = false;
+    authMessage.textContent = 'Googleログインを開けませんでした。もう一度お試しください。';
   }
 }
 
@@ -273,20 +294,16 @@ async function initializeGoogleSignIn() {
       return;
     }
     await loadGoogleIdentityServices();
-    window.google.accounts.id.initialize({
+    googleTokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: config.clientId,
-      callback: handleGoogleCredential,
-      auto_select: false,
-      cancel_on_tap_outside: true
+      scope: 'openid email',
+      callback: handleGoogleAccessToken,
+      error_callback: (error) => {
+        googleLoginButton.disabled = false;
+        authMessage.textContent = error?.message || 'Googleログインを完了できませんでした。';
+      }
     });
-    window.google.accounts.id.renderButton(googleSignIn, {
-      type: 'standard',
-      theme: 'outline',
-      size: 'large',
-      text: 'signin_with',
-      shape: 'pill',
-      width: 260
-    });
+    googleLoginButton.disabled = false;
   } catch (error) {
     authMessage.textContent = error.message || 'Googleログインを読み込めませんでした。';
   }
@@ -758,6 +775,7 @@ refreshHistoryButton?.addEventListener('click', () => void loadHistory());
 dictionaryForm?.addEventListener('submit', (event) => void saveDictionaryEntry(event));
 dictionaryCancel?.addEventListener('click', cancelDictionaryEdit);
 logoutButton?.addEventListener('click', () => void logout());
+googleLoginButton?.addEventListener('click', beginGoogleLogin);
 sourceText.addEventListener('input', () => {
   rebuildDocument();
   setMessage('');

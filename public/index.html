@@ -55,7 +55,10 @@
       <section id="authGate" class="auth-gate" aria-labelledby="authTitle">
         <h2 id="authTitle">ログイン（任意）</h2>
         <p>変換はログインなしで使えます。履歴と単語登録を使う場合だけGoogleログインしてください。入力文はCloudflare AIへ送信され、ログインなしでは履歴に保存されません。</p>
-        <div id="googleSignIn"></div>
+        <button id="googleLoginButton" class="google-login-button" type="button" disabled>
+          <span class="google-login-mark" aria-hidden="true">G</span>
+          Googleでログイン
+        </button>
         <p id="authMessage" class="auth-message" role="status" aria-live="polite"></p>
       </section>
 

@@ -105,7 +105,7 @@ Workers AIの無料枠はアカウント全体で1日10,000 Neuronsです。Free
 ### ログイン（任意）と履歴・単語登録
 
 - 変換はログイン不要で利用できます。ログインなしでは履歴・単語登録を読み書きせず、成功した変換も保存しません。入力文はWorkers AIへ送信して変換します。
-- Googleログインは履歴・単語登録を使う場合だけ必要です。Cloudflare Access / Zero Trustは使用せず、Google Identity Servicesでログインし、Pages FunctionsがGoogle ID tokenを検証してセッションCookieを発行します。
+- Googleログインは履歴・単語登録を使う場合だけ必要です。Cloudflare Access / Zero Trustは使用せず、Google Identity ServicesのOAuthポップアップで `openid email` のみを要求します。Pages FunctionsはGoogleのUserInfo endpointでアクセストークンを確認し、許可アカウントに12時間のHttpOnly/Secure/SameSiteセッションCookieを発行します。
 - Google CloudでOAuthクライアント（ウェブアプリ）を作り、本番サイトのオリジンを「承認済みの JavaScript 生成元」に登録します。ログインはポップアップ方式のため、リダイレクトURIは使いません。
 - Pages Functionsの設定は `wrangler.toml` で管理し、本番環境だけに `HISTORY_DB` を接続します。Pages production secretsに `GOOGLE_CLIENT_ID`（公開可能なOAuthクライアントID）、`GOOGLE_ALLOWED_EMAILS`（許可アドレス一覧）、`GOOGLE_SESSION_SECRET`（32バイト以上のランダムな秘密値）を設定します。これらの設定はログイン機能専用で、匿名変換には不要です。秘密値や許可アドレスをコードや公開リポジトリに書きません。
 - FunctionsはGoogle署名鍵・issuer・audience・有効期限・メール検証済み状態を確認し、許可リストと照合します。12時間のHttpOnly/Secure/SameSiteセッションCookieを発行し、失効後は再ログインします。

@@ -1,4 +1,5 @@
 const GOOGLE_CERTS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
+const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const SESSION_COOKIE = '__Host-romaji_session';
 const SESSION_SECONDS = 12 * 60 * 60;
 const googleKeyCache = { keys: null, expiresAt: 0 };
@@ -92,6 +93,23 @@ export async function verifyGoogleIdToken(token, clientId) {
     !(claims.email_verified === true || claims.email_verified === 'true')
   ) throw new Error('invalid_claims');
 
+  return { email: claims.email.trim().toLowerCase(), sub: claims.sub.trim() };
+}
+
+export async function verifyGoogleAccessToken(token) {
+  if (typeof token !== 'string' || token.length > 8192 || /\s/.test(token)) {
+    throw new Error('invalid_access_token');
+  }
+  const response = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error('invalid_access_token');
+  const claims = await response.json();
+  if (
+    typeof claims.sub !== 'string' || !claims.sub.trim() ||
+    typeof claims.email !== 'string' || !claims.email.trim() ||
+    !(claims.email_verified === true || claims.email_verified === 'true')
+  ) throw new Error('invalid_userinfo');
   return { email: claims.email.trim().toLowerCase(), sub: claims.sub.trim() };
 }
 

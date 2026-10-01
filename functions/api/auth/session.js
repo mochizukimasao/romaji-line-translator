@@ -4,7 +4,8 @@ import {
   getAllowedEmails,
   getAuthorizedIdentity,
   isSameOriginPost,
-  verifyGoogleIdToken
+  verifyGoogleIdToken,
+  verifyGoogleAccessToken
 } from '../../lib/google-auth.js';
 import { hasJsonContentType, readJsonLimited } from '../../lib/read-json-limited.js';
 
@@ -27,8 +28,10 @@ export async function onRequestPost({ request, env }) {
   const parsed = await readJsonLimited(request, 24000);
   if (parsed.tooLarge) return json({ error: 'リクエストが大きすぎます。' }, 413);
   if (!parsed.ok) return json({ error: 'ログイン情報を読み取れませんでした。' }, 400);
-  const token = parsed.value?.credential;
-  if (typeof token !== 'string' || token.length > 20000) {
+  const credential = parsed.value?.credential;
+  const accessToken = parsed.value?.accessToken;
+  if ((!credential || typeof credential !== 'string' || credential.length > 20000) &&
+      (!accessToken || typeof accessToken !== 'string' || accessToken.length > 8192)) {
     return json({ error: 'Googleログイン情報がありません。' }, 400);
   }
 
@@ -39,7 +42,9 @@ export async function onRequestPost({ request, env }) {
     return json({ error: 'Googleログインの設定が完了していません。' }, 503);
   }
   try {
-    const identity = await verifyGoogleIdToken(token, clientId);
+    const identity = credential
+      ? await verifyGoogleIdToken(credential, clientId)
+      : await verifyGoogleAccessToken(accessToken);
     if (!allowedEmails.includes(identity.email)) {
       return json({ error: 'このGoogleアカウントには利用権限がありません。' }, 403);
     }
