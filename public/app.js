@@ -1,5 +1,4 @@
 import {
-  addSentencePeriod,
   buildDocument,
   canApplyResult,
   composeCopyText,
@@ -8,9 +7,9 @@ import {
   getTranslationMessage,
   isCurrentResponse,
   reconcileDocument
-} from '/core.js';
-import { API_LIMITS } from '/limits.js';
-import { convertRomajiLocally, formatJapaneseLocally } from '/local-convert.js';
+} from '/core.js?v=auth-fix-20261001-c';
+import { API_LIMITS } from '/limits.js?v=auth-fix-20261001-c';
+import { convertRomajiLocally, formatJapaneseLocally } from '/local-convert.js?v=auth-fix-20261001-c';
 
 const sourceText = document.querySelector('#sourceText');
 const results = document.querySelector('#results');
@@ -477,7 +476,7 @@ async function translateTargets(targets, successMessage = '') {
             state.set(item.id, {
               ...item,
               status: 'done',
-              output: addSentencePeriod(item.source, result.output, mode),
+              output: result.output,
               errorCode: null,
               token: serial
             });
