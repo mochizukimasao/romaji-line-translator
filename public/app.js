@@ -295,12 +295,24 @@ function beginGoogleLogin() {
 async function initializeGoogleSignIn() {
   if (googleSignInInitialized || authenticatedUser) return;
   googleSignInInitialized = true;
+  googleLoginButton.disabled = true;
+  retryGoogleLogin.hidden = true;
+  authMessage.textContent = 'Googleログインを読み込んでいます…';
   try {
-    const configResponse = await fetch('/api/auth/config', { cache: 'no-store' });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
+    let configResponse;
+    try {
+      configResponse = await fetch('/api/auth/config', {
+        cache: 'no-store',
+        signal: controller.signal
+      });
+    } finally {
+      window.clearTimeout(timeout);
+    }
     const config = await configResponse.json().catch(() => ({}));
     if (!configResponse.ok || !config.clientId) {
-      authMessage.textContent = config.error || 'Googleログインの設定が完了していません。';
-      return;
+      throw new Error(config.error || 'Googleログインの設定が完了していません。');
     }
     await loadGoogleIdentityServices();
     googleTokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -319,7 +331,9 @@ async function initializeGoogleSignIn() {
     googleSignInInitialized = false;
     googleLoginButton.disabled = true;
     retryGoogleLogin.hidden = false;
-    authMessage.textContent = error.message || 'Googleログインを読み込めませんでした。';
+    authMessage.textContent = error.name === 'AbortError'
+      ? 'Googleログイン設定の取得が時間切れになりました。再試行してください。'
+      : error.message || 'Googleログインを読み込めませんでした。';
   }
 }
 
