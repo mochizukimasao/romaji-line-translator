@@ -16,6 +16,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node.js for Wrangler
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build Pages Functions Worker
+        run: |
+          npx --yes wrangler@4.145.0 pages functions build functions --outdir .wrangler/functions-bundle --project-directory . --build-output-directory public --output-routes-path public/_routes.json
+          cp .wrangler/functions-bundle/index.js public/_worker.js
+
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
         with:
