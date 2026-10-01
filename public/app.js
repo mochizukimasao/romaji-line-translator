@@ -10,6 +10,7 @@ import {
   reconcileDocument
 } from '/core.js';
 import { API_LIMITS } from '/limits.js';
+import { convertRomajiLocally, formatJapaneseLocally } from '/local-convert.js';
 
 const sourceText = document.querySelector('#sourceText');
 const results = document.querySelector('#results');
@@ -333,7 +334,13 @@ async function requestTranslation(items, mode) {
     body: JSON.stringify({ mode, items: items.map((item) => ({ id: item.id, text: item.source })) })
   });
   const data = await response.json().catch(() => ({}));
-  if (response.status === 401) void requireLogin(data.error);
+  if (response.status === 401) {
+    return items.map((item) => ({
+      id: item.id, status: 'ok',
+      output: mode === 'romaji' ? convertRomajiLocally(item.source) : formatJapaneseLocally(item.source),
+      errorCode: null, localFallback: true
+    }));
+  }
   if (!response.ok) throw new Error(data.error || '変換サービスを利用できません。');
   if (!Array.isArray(data.results)) throw new Error('変換結果を読み取れませんでした。');
   return data.results;
