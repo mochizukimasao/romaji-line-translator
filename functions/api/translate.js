@@ -44,6 +44,7 @@ export async function onRequestPost(context) {
           : formatJapaneseLocally(item.text),
         errorCode: null
       }));
+    // Keep basic conversions available when the free AI quota or service is unavailable.
     const usedLocalFallback = Boolean(env.AI && results.some((result) => result.status === 'error'));
     if (usedLocalFallback) {
       const sourceById = new Map(validation.items.map((item) => [item.id, item.text]));
