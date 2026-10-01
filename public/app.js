@@ -1,4 +1,5 @@
 import {
+  addSentencePeriod,
   buildDocument,
   canApplyResult,
   composeCopyText,
@@ -8,6 +9,7 @@ import {
   isCurrentResponse,
   reconcileDocument
 } from '/core.js';
+import { API_LIMITS } from '/limits.js';
 
 const sourceText = document.querySelector('#sourceText');
 const results = document.querySelector('#results');
@@ -44,12 +46,17 @@ const translatorTools = document.querySelector('#translatorTools');
 const workspace = document.querySelector('#workspace');
 const historyPanel = document.querySelector('#historyPanel');
 const DISPLAY_HEIGHT_STORAGE_KEY = 'romaji-line-translator.display-height';
+const MAX_CONCURRENT_API_REQUESTS = 2;
 const modeMeta = {
-  romaji: { hint: '文の区切り: 句読点・改行', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
-  japanese: { hint: '文の区切り: 改行', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
+  romaji: { hint: 'AIなし・APIキー不要：ローマ字をかなへ変換', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
+  japanese: { hint: 'AIなし・APIキー不要：空白と句読点を整形', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
 };
 const statusLabels = { draft: '未確定', pending: '待機中', loading: '変換中', done: '完了', error: '失敗' };
-const errorLabels = { configuration: 'AI設定エラー', account_access: 'CloudflareのAI利用権限エラー', model_terms: 'AIモデル規約への同意が必要', model_unavailable: 'AIモデルが利用できません', paid_plan_required: '有料プランが必要なモデルです', request_invalid: 'AIへのリクエスト設定エラー', ai_binding_error: 'AIバインディングエラー', service: 'サービスエラー', transient_service: '一時的な通信エラー', rate_limit: '無料枠上限または混雑', timeout: '時間切れ', invalid_json: '応答形式エラー', count_mismatch: '結果数エラー', validation: '結果確認エラー', missing_result: '結果なし' };
+const errorLabels = {
+  configuration: '設定エラー', service: 'サービスエラー', transient_service: '一時的な通信エラー',
+  rate_limit: '混雑', timeout: '時間切れ', invalid_json: '応答形式エラー',
+  count_mismatch: '結果数エラー', validation: '結果確認エラー', missing_result: '結果なし'
+};
 let currentMode = 'romaji';
 let requestVersion = 0;
 let requestSerial = 0;
@@ -89,29 +96,6 @@ function setAuthenticatedUser(user) {
 
 function getItem(item) {
   return state.get(item.id) || item;
-}
-
-function addSentencePeriod(source, output, mode) {
-  let text = String(output || '').trimEnd().replace(/([?!.,])([」』）》】〕〉”’"'）\]\}]*)$/u, (_, mark, closers) => {
-    const japaneseMark = { '?': '？', '!': '！', '.': '。', ',': '、' }[mark];
-    return `${japaneseMark}${closers}`;
-  });
-  text = text.replace(
-    /(です|ます|でした|ました)[ \t]+(?!(?:が|けど|から|ので|のに|し|と|は|も|を|に|へ|で|ね|よ|か|です|ます|でした|ました|でしょう))(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu,
-    '$1。'
-  );
-  if (!text || /[。！？!?…](?:[」』）》】〕〉”’"'）\]\}]*)$/u.test(text)) return text;
-
-  const words = String(source || '').trim().split(/\s+/u).filter(Boolean);
-  const japaneseCharacters = [...text].filter((character) => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(character)).length;
-  const sentenceLike = words.length >= 3 ||
-    (words.length >= 2 && japaneseCharacters >= 8) ||
-    (mode === 'japanese' && japaneseCharacters >= 12);
-
-  if (!sentenceLike) return text;
-  const sourceEndsInQuestion = /[?？]\s*$/u.test(String(source || '')) ||
-    (mode === 'romaji' && /(?:desu|masu)?ka\s*$/iu.test(String(source || '').trim()));
-  return `${text}${sourceEndsInQuestion ? '？' : '。'}`;
 }
 
 function rebuildDocument() {
@@ -188,7 +172,7 @@ function render() {
 
   if (!documentModel.some((line) => line.segments.length)) {
     results.className = 'results empty';
-    results.textContent = '⌘+Enterで変換（Windows/LinuxはCtrl+Enter）。完了後は⌘+Shift+Enterで全文コピー（Windows/LinuxはCtrl+Shift+Enter）。';
+    results.textContent = '改行ごとに変換します。⌘+Enterで変換（Windows/LinuxはCtrl+Enter）。完了後は⌘+Shift+Enterで全文コピー（Windows/LinuxはCtrl+Shift+Enter）。';
     return;
   }
 
@@ -207,7 +191,9 @@ function render() {
     const statusValue = lineStatus.includes('error') ? 'error' : lineStatus.includes('loading') ? 'loading' : lineStatus.includes('draft') ? 'draft' : lineStatus.includes('pending') ? 'pending' : 'done';
     status.className = `row-status ${statusValue}`;
     const failedItem = line.segments.map((item) => getItem(item)).find((item) => item.status === 'error');
-    status.textContent = failedItem ? errorLabels[failedItem.errorCode] || (failedItem.errorCode?.startsWith('cloudflare_') ? `Cloudflare AIエラー ${failedItem.errorCode.slice(11)}` : statusLabels.error) : line.segments.length ? statusLabels[statusValue] : '空行';
+    status.textContent = failedItem
+      ? errorLabels[failedItem.errorCode] || statusLabels.error
+      : line.segments.length ? statusLabels[statusValue] : '空行';
     row.append(number, text, status);
     for (const item of line.segments) {
       if (getItem(item).status === 'error') {
@@ -355,58 +341,97 @@ async function requestTranslation(items, mode) {
   return data.results;
 }
 
+function splitTargetsForApi(targets) {
+  const batches = [];
+  let batch = [];
+  let batchLength = 0;
+  for (const item of targets) {
+    if (batch.length && (
+      batch.length >= API_LIMITS.maxItems ||
+      batchLength + item.source.length > API_LIMITS.maxTotalLength
+    )) {
+      batches.push(batch);
+      batch = [];
+      batchLength = 0;
+    }
+    batch.push(item);
+    batchLength += item.source.length;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
 async function translateTargets(targets, successMessage = '') {
   const translatedDocumentVersion = requestVersion;
-  const currentTargets = targets.map((item) => getItem(item));
-  const unique = currentTargets.filter((item, index, list) => list.findIndex((other) => other.id === item.id) === index);
+  const seenIds = new Set();
+  const unique = targets.map((item) => getItem(item)).filter((item) => {
+    if (seenIds.has(item.id)) return false;
+    seenIds.add(item.id);
+    return true;
+  });
   if (!unique.length) return;
+  const oversized = unique.find((item) => item.source.length > API_LIMITS.maxItemLength);
+  if (oversized) {
+    setMessage(`1行の入力は${API_LIMITS.maxItemLength}文字までです。長い行を分けてください。`, true);
+    return;
+  }
   const serial = ++requestSerial;
   const mode = unique[0].mode;
+  const batches = splitTargetsForApi(unique);
   unique.forEach((item) => state.set(item.id, { ...item, status: 'loading', output: '', token: serial }));
   setMessage('');
   render();
-  try {
-    const responseResults = await requestTranslation(unique, mode);
-    const byId = new Map(responseResults.map((result) => [result.id, result]));
-    for (const item of unique) {
-      const result = byId.get(item.id);
-      const current = state.get(item.id);
-      if (!isCurrentResponse(item, result, current, serial)) continue;
-      if (result.status === 'error') {
-        state.set(item.id, { ...item, status: 'error', output: '', errorCode: result.errorCode || 'service', token: serial });
-      } else if (canApplyResult(item, result, current, serial)) {
-        state.set(item.id, {
-          ...item,
-          status: 'done',
-          output: addSentencePeriod(item.text, result.output, mode),
-          errorCode: null,
-          token: serial
-        });
+  let nextBatch = 0;
+  let completedItems = 0;
+  let requestError = '';
+  let usedLocalFallback = false;
+  const worker = async () => {
+    while (nextBatch < batches.length) {
+      const batch = batches[nextBatch++];
+      try {
+        const responseResults = await requestTranslation(batch, mode);
+        const byId = new Map(responseResults.map((result) => [result.id, result]));
+        for (const item of batch) {
+          const result = byId.get(item.id);
+          const current = state.get(item.id);
+          if (!isCurrentResponse(item, result, current, serial)) continue;
+          if (result.status === 'error') {
+            state.set(item.id, { ...item, status: 'error', output: '', errorCode: result.errorCode || 'service', token: serial });
+          } else if (canApplyResult(item, result, current, serial)) {
+            usedLocalFallback ||= result.localFallback === true;
+            state.set(item.id, {
+              ...item,
+              status: 'done',
+              output: addSentencePeriod(item.source, result.output, mode),
+              errorCode: null,
+              token: serial
+            });
+          }
+        }
+      } catch (error) {
+        requestError = requestError || error?.message || '変換サービスを利用できません。';
+        for (const item of batch) {
+          const current = state.get(item.id);
+          if (current?.token === serial && current.requestVersion === item.requestVersion) {
+            state.set(item.id, { ...item, status: 'error', output: '', errorCode: 'service', token: serial });
+          }
+        }
       }
+      completedItems += batch.length;
+      if (completedItems < unique.length) setMessage(`${completedItems} / ${unique.length}行を処理しました…`);
     }
-    for (const item of unique) {
-      const current = state.get(item.id);
-      if (
-        current?.token === serial &&
-        current.requestVersion === item.requestVersion &&
-        current.status === 'loading'
-      ) {
-        state.set(item.id, { ...item, status: 'error', output: '', errorCode: 'missing_result', token: serial });
-      }
+  };
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_API_REQUESTS, batches.length) }, worker));
+  for (const item of unique) {
+    const current = state.get(item.id);
+    if (current?.token === serial && current.requestVersion === item.requestVersion && current.status === 'loading') {
+      state.set(item.id, { ...item, status: 'error', output: '', errorCode: 'missing_result', token: serial });
     }
-    const outcome = getTranslationMessage(documentModel, getItem, successMessage);
-    setMessage(outcome.text, outcome.isError);
-  } catch (error) {
-    let appliedError = false;
-    unique.forEach((item) => {
-      const current = state.get(item.id);
-      if (current?.token === serial && current.requestVersion === item.requestVersion) {
-        state.set(item.id, { ...item, status: 'error', output: '', errorCode: 'service', token: serial });
-        appliedError = true;
-      }
-    });
-    if (appliedError) setMessage(error?.message || '変換サービスを利用できません。', true);
   }
+  const outcome = getTranslationMessage(documentModel, getItem, successMessage);
+  setMessage(requestError || (usedLocalFallback
+    ? 'AI変換が使えない行は、簡易ローマ字変換で補いました。'
+    : outcome.text), Boolean(requestError) || outcome.isError);
   render();
   if (translatedDocumentVersion === requestVersion && getDocumentStatus(documentModel, getItem) === 'done') {
     void saveHistory(translatedDocumentVersion);
@@ -428,8 +453,11 @@ function renderHistory() {
     const dateText = Number.isNaN(date.valueOf()) ? '' : new Intl.DateTimeFormat('ja-JP', {
       dateStyle: 'medium', timeStyle: 'short'
     }).format(date);
-    const preview = record.source.replace(/\s+/g, ' ').slice(0, 72);
-    summary.textContent = `${dateText} · ${preview}${record.source.length > 72 ? '…' : ''}`;
+    const previewText = typeof record.result === 'string' && record.result.trim()
+      ? record.result
+      : record.source;
+    const preview = previewText.replace(/\s+/g, ' ').slice(0, 72);
+    summary.textContent = `${dateText} · ${preview}${previewText.length > 72 ? '…' : ''}`;
 
     const content = document.createElement('div');
     content.className = 'history-content';
