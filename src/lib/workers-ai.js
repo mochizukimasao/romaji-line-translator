@@ -72,9 +72,7 @@ function classifyWorkersAIError(error) {
 async function translateBatch(ai, items, mode, dictionary, model) {
   try {
     const response = await ai.run(model, {
-      messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }],
-      temperature: 0,
-      max_tokens: 4096
+      messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }]
     });
     const parsed = parseModelResponse(response?.response ?? response?.output ?? response);
     const byId = new Map(parsed.filter((result) => typeof result.id === 'string').map((result) => [result.id, result]));
