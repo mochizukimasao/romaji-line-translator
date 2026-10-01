@@ -71,9 +71,25 @@ function classifyWorkersAIError(error) {
 
 async function translateBatch(ai, items, mode, dictionary, model) {
   try {
-    const response = await ai.run(model, {
-      messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }]
-    });
+    let response;
+    try {
+      response = await ai.run(model, {
+        messages: [{ role: 'user', content: buildTranslatePrompt(mode, items, dictionary) }]
+      });
+    } catch (error) {
+      const status = Number(error?.status ?? error?.statusCode ?? error?.cause?.status ?? 0);
+      const code = String(error?.code ?? error?.cause?.code ?? '');
+      console.error('Workers AI invocation failed', {
+        name: String(error?.name || 'Error'),
+        status: Number.isInteger(status) && status > 0 ? status : null,
+        code: /^\d{3,5}$/u.test(code) ? code : null,
+        keys: Object.keys(error || {}).sort(),
+        causeName: error?.cause?.name ? String(error.cause.name) : null,
+        causeStatus: Number(error?.cause?.status) || null,
+        causeCode: /^\d{3,5}$/u.test(String(error?.cause?.code ?? '')) ? String(error.cause.code) : null
+      });
+      throw error;
+    }
     const parsed = parseModelResponse(response?.response ?? response?.output ?? response);
     const byId = new Map(parsed.filter((result) => typeof result.id === 'string').map((result) => [result.id, result]));
     return items.map((item, index) => {
