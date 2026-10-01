@@ -37,7 +37,16 @@ export async function onRequestPost(context) {
         errorCode: null
       }));
     return json({ results });
-  } catch {
+  } catch (error) {
+    const status = Number(error?.status ?? error?.statusCode ?? error?.cause?.status ?? 0);
+    const code = String(error?.code ?? error?.cause?.code ?? '');
+    console.error('Translate endpoint failed', {
+      name: String(error?.name || 'Error'),
+      status: Number.isInteger(status) && status > 0 ? status : null,
+      code: /^\d{3,5}$/u.test(code) ? code : null,
+      keys: Object.keys(error || {}).sort(),
+      causeName: error?.cause?.name ? String(error.cause.name) : null
+    });
     return json({ error: '変換サービスを利用できません。' }, 503);
   }
 }
