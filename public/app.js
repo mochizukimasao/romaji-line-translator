@@ -329,7 +329,7 @@ async function logout() {
 }
 
 async function requestTranslation(items, mode) {
-  const endpoint = authenticatedUser ? '/api/translate' : '/api/translate-anonymous';
+  const endpoint = '/api/translate';
   const response = await fetch(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode, items: items.map((item) => ({ id: item.id, text: item.source })) })
