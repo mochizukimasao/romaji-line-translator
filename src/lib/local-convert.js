@@ -78,6 +78,6 @@ export function convertRomajiLocally(source, dictionary = []) {
 export function formatJapaneseLocally(source) {
   return String(source ?? '').trim()
     .replace(/\s+/gu, ' ')
-    .replace(/(?<=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana]) (?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu, '')
+    .replace(/([\u3040-\u30ff\u3400-\u9fff\uF900-\uFAFF]) ([\u3040-\u30ff\u3400-\u9fff\uF900-\uFAFF])/gu, '$1$2')
     .replace(/([?!,])(?=\s|$)/gu, (mark) => ASCII_PUNCTUATION[mark]);
 }
