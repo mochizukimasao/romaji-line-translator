@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { API_LIMITS, validateTranslateRequest } from '../src/lib/api-request.js';
+import { API_LIMITS as FRONTEND_API_LIMITS } from '../public/limits.js';
+
+test('frontend module limits stay in sync with Pages Functions validation', () => {
+  assert.deepEqual(FRONTEND_API_LIMITS, API_LIMITS);
+});
 
 test('API validation preserves inputs exactly at their limits', () => {
   const id = 'i'.repeat(API_LIMITS.maxIdLength);
