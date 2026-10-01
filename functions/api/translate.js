@@ -11,8 +11,8 @@ function json(body, status = 200) {
 export async function onRequestPost(context) {
   const { request, env } = context;
   if (!isSameOriginPost(request)) return json({ error: '不正なリクエスト元です。' }, 403);
-  const auth = await getAuthorizedIdentity(request, env);
-  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const authResult = await getAuthorizedIdentity(request, env);
+  const auth = authResult.ok ? authResult : null;
   if (!hasJsonContentType(request)) return json({ error: 'JSON形式で送信してください。' }, 415);
   const parsed = await readJsonLimited(request);
   if (parsed.tooLarge) return json({ error: 'リクエストが大きすぎます。' }, 413);
@@ -20,9 +20,12 @@ export async function onRequestPost(context) {
   const body = parsed.value;
   const validation = validateTranslateRequest(body);
   if (!validation.ok) return json({ error: validation.error }, validation.status);
+  if (!auth && (validation.items.length > 8 || validation.items.reduce((sum, item) => sum + item.text.length, 0) > 3000)) {
+    return json({ error: 'ログインなしの変換は、1回8項目・合計3000文字までです。' }, 400);
+  }
   try {
     let dictionary = [];
-    if (validation.mode === 'romaji' && env.HISTORY_DB) {
+    if (auth && validation.mode === 'romaji' && env.HISTORY_DB) {
       try {
         dictionary = (await env.HISTORY_DB.prepare(
           'SELECT reading, replacement FROM user_dictionary WHERE user_sub = ? ORDER BY reading COLLATE NOCASE LIMIT 100'

@@ -47,9 +47,10 @@ const workspace = document.querySelector('#workspace');
 const historyPanel = document.querySelector('#historyPanel');
 const DISPLAY_HEIGHT_STORAGE_KEY = 'romaji-line-translator.display-height';
 const MAX_CONCURRENT_API_REQUESTS = 2;
+const GUEST_API_LIMITS = { maxItems: 8, maxTotalLength: 3000 };
 const modeMeta = {
-  romaji: { hint: 'AIなし・APIキー不要：ローマ字をかなへ変換', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
-  japanese: { hint: 'AIなし・APIキー不要：空白と句読点を整形', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
+  romaji: { hint: 'AI利用（無料枠・APIキー不要）：ローマ字をかなへ変換', placeholder: 'otukaresamadesu.\nashita no yotei wo kakunin shitai?' },
+  japanese: { hint: 'AI利用（無料枠・APIキー不要）：空白と句読点を整形', placeholder: 'きょう は いい てんきだ\nでも すこし さむい' }
 };
 const statusLabels = { draft: '未確定', pending: '待機中', loading: '変換中', done: '完了', error: '失敗' };
 const errorLabels = {
@@ -86,12 +87,13 @@ function setAuthenticatedUser(user) {
   authenticatedUser = user || null;
   const authenticated = Boolean(authenticatedUser);
   authGate.hidden = authenticated;
-  workspace.hidden = !authenticated;
+  workspace.hidden = false;
   historyPanel.hidden = !authenticated;
   dictionaryPanel.hidden = !authenticated;
-  translatorTools.hidden = !authenticated;
+  translatorTools.hidden = false;
   authControls.hidden = !authenticated;
   authAccount.textContent = authenticated ? authenticatedUser.email : '';
+  if (!authenticated) authMessage.textContent = '';
 }
 
 function getItem(item) {
@@ -216,12 +218,8 @@ function clearPrivateView() {
   historyRecords = [];
   dictionaryEntries = [];
   cancelDictionaryEdit();
-  sourceText.value = '';
-  state.clear();
-  rebuildDocument();
   renderHistory();
   renderDictionary();
-  render();
 }
 
 async function requireLogin(messageText = 'ログインの有効期限が切れました。再度ログインしてください。') {
@@ -343,12 +341,13 @@ async function requestTranslation(items, mode) {
 
 function splitTargetsForApi(targets) {
   const batches = [];
+  const limits = authenticatedUser ? API_LIMITS : GUEST_API_LIMITS;
   let batch = [];
   let batchLength = 0;
   for (const item of targets) {
     if (batch.length && (
-      batch.length >= API_LIMITS.maxItems ||
-      batchLength + item.source.length > API_LIMITS.maxTotalLength
+      batch.length >= limits.maxItems ||
+      batchLength + item.source.length > limits.maxTotalLength
     )) {
       batches.push(batch);
       batch = [];
@@ -370,9 +369,10 @@ async function translateTargets(targets, successMessage = '') {
     return true;
   });
   if (!unique.length) return;
-  const oversized = unique.find((item) => item.source.length > API_LIMITS.maxItemLength);
+  const maxItemLength = authenticatedUser ? API_LIMITS.maxItemLength : GUEST_API_LIMITS.maxTotalLength;
+  const oversized = unique.find((item) => item.source.length > maxItemLength);
   if (oversized) {
-    setMessage(`1行の入力は${API_LIMITS.maxItemLength}文字までです。長い行を分けてください。`, true);
+    setMessage(`1行の入力は${maxItemLength}文字までです。長い行を分けてください。`, true);
     return;
   }
   const serial = ++requestSerial;
@@ -433,7 +433,7 @@ async function translateTargets(targets, successMessage = '') {
     ? 'AI変換が使えない行は、簡易ローマ字変換で補いました。'
     : outcome.text), Boolean(requestError) || outcome.isError);
   render();
-  if (translatedDocumentVersion === requestVersion && getDocumentStatus(documentModel, getItem) === 'done') {
+  if (authenticatedUser && translatedDocumentVersion === requestVersion && getDocumentStatus(documentModel, getItem) === 'done') {
     void saveHistory(translatedDocumentVersion);
   }
 }
@@ -633,6 +633,7 @@ async function loadHistory() {
 }
 
 async function saveHistory(expectedVersion) {
+  if (!authenticatedUser) return;
   const copy = composeCopyText(documentModel, getItem);
   if (requestVersion !== expectedVersion || !copy.ready || !sourceText.value.trim()) return;
   try {
