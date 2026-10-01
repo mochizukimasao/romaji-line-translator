@@ -40,6 +40,7 @@ const dictionaryList = document.querySelector('#dictionaryList');
 const authGate = document.querySelector('#authGate');
 const authMessage = document.querySelector('#authMessage');
 const googleLoginButton = document.querySelector('#googleLoginButton');
+const retryGoogleLogin = document.querySelector('#retryGoogleLogin');
 const authControls = document.querySelector('#authControls');
 const authAccount = document.querySelector('#authAccount');
 const logoutButton = document.querySelector('#logoutButton');
@@ -232,13 +233,21 @@ async function requireLogin(messageText = 'ログインの有効期限が切れ�
 }
 
 function loadGoogleIdentityServices() {
-  if (window.google?.accounts?.id) return Promise.resolve();
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
-    script.addEventListener('load', resolve, { once: true });
-    script.addEventListener('error', () => reject(new Error('Googleログインを読み込めませんでした。')), { once: true });
+    const timeout = window.setTimeout(() => reject(new Error('Googleログインの読み込みに時間がかかっています。接続を確認して再試行してください。')), 10000);
+    script.addEventListener('load', () => {
+      window.clearTimeout(timeout);
+      if (window.google?.accounts?.oauth2) resolve();
+      else reject(new Error('Googleログイン機能を初期化できませんでした。'));
+    }, { once: true });
+    script.addEventListener('error', () => {
+      window.clearTimeout(timeout);
+      reject(new Error('Googleログインを読み込めませんでした。接続を確認して再試行してください。'));
+    }, { once: true });
     document.head.append(script);
   });
 }
@@ -304,7 +313,12 @@ async function initializeGoogleSignIn() {
       }
     });
     googleLoginButton.disabled = false;
+    retryGoogleLogin.hidden = true;
+    authMessage.textContent = '';
   } catch (error) {
+    googleSignInInitialized = false;
+    googleLoginButton.disabled = true;
+    retryGoogleLogin.hidden = false;
     authMessage.textContent = error.message || 'Googleログインを読み込めませんでした。';
   }
 }
@@ -776,6 +790,11 @@ dictionaryForm?.addEventListener('submit', (event) => void saveDictionaryEntry(e
 dictionaryCancel?.addEventListener('click', cancelDictionaryEdit);
 logoutButton?.addEventListener('click', () => void logout());
 googleLoginButton?.addEventListener('click', beginGoogleLogin);
+retryGoogleLogin?.addEventListener('click', () => {
+  retryGoogleLogin.hidden = true;
+  authMessage.textContent = 'Googleログインを読み込んでいます…';
+  void initializeGoogleSignIn();
+});
 sourceText.addEventListener('input', () => {
   rebuildDocument();
   setMessage('');
