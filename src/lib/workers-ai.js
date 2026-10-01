@@ -52,6 +52,10 @@ function classifyWorkersAIError(error) {
   if (['3023', '3041', '5018'].includes(documentedCode)) return 'account_access';
   if (['5007', '3042'].includes(documentedCode)) return 'model_unavailable';
   if (['3003', '3006'].includes(documentedCode)) return 'request_invalid';
+  const cloudflareCode = message.match(/\b(\d{4})\b/u)?.[1];
+  if (cloudflareCode) return `cloudflare_${cloudflareCode}`;
+  if (error?.name === 'TypeError') return 'ai_binding_error';
+  if (error?.name === 'AbortError') return 'timeout';
   if (status === 408) return 'timeout';
   if (status === 429) return 'rate_limit';
   if ([400, 404].includes(status)) return 'model_unavailable';
