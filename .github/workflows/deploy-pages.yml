@@ -22,7 +22,10 @@ jobs:
           node-version: 22
 
       - name: Build Pages Functions Worker
-        run: npx --yes wrangler@4.145.0 pages functions build functions --outfile public/_worker.js --project-directory . --build-output-directory public --output-routes-path public/_routes.json
+        run: |
+          rm -f public/_worker.js
+          npx --yes wrangler@4.145.0 pages functions build functions --outdir .wrangler/pages-worker-build --project-directory . --build-output-directory public --output-routes-path public/_routes.json
+          cp .wrangler/pages-worker-build/index.js public/_worker.js
 
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
