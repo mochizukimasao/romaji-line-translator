@@ -49,6 +49,9 @@ export async function onRequestPost(context) {
       }));
     // Keep basic conversions available when the free AI quota or service is unavailable.
     const usedLocalFallback = Boolean(env.AI && results.some((result) => result.status === 'error'));
+    const fallbackReason = usedLocalFallback
+      ? results.find((result) => result.status === 'error')?.errorCode || 'unknown'
+      : null;
     if (usedLocalFallback) {
       const sourceById = new Map(validation.items.map((item) => [item.id, item.text]));
       results = results.map((result) => result.status === 'error'
@@ -63,7 +66,7 @@ export async function onRequestPost(context) {
           }
         : result);
     }
-    return json({ results, usedLocalFallback });
+    return json({ results, usedLocalFallback, fallbackReason });
   } catch {
     return json({ error: '変換サービスを利用できません。' }, 503);
   }
